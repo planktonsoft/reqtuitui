@@ -5,9 +5,11 @@ use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 
-use crate::models::{ApiRequest, ApiResponse};
+use crate::models::{ApiRequest, ApiResponse, BodyType, Environment};
+use crate::parser::TemplateParser;
 pub struct HttpManager {
     client: Client,
+    parser: TemplateParser,
 }
 
 impl HttpManager {
@@ -15,14 +17,18 @@ impl HttpManager {
         Self {
             // A single client instance handles connection pooling
             client: Client::new(),
+            parser: TemplateParser::new(),
         }
     }
 
     pub async fn execute(
         &self,
         req_data: ApiRequest,
+        active_env: Option<&Environment>,
     ) -> Result<ApiResponse, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
+
+        let parsed_url = self.parser.parse_string(&req_data.url, active_env);
 
         // Map your custom HttpMethod to reqwest's Method
         let method = match req_data.method {
@@ -34,15 +40,25 @@ impl HttpManager {
         // Convert HashMap headers to reqwest HeaderMap
         let mut headers = HeaderMap::new();
         for (k, v) in req_data.headers {
-            if let (Ok(name), Ok(value)) = (HeaderName::from_str(&k), HeaderValue::from_str(&v)) {
+            let parsed_key = self.parser.parse_string(&k, active_env);
+            let parsed_val = self.parser.parse_string(&v, active_env);
+
+            if let (Ok(name), Ok(value)) = (
+                HeaderName::from_str(&parsed_key),
+                HeaderValue::from_str(&parsed_val),
+            ) {
                 headers.insert(name, value);
             }
         }
 
         // Build and send the request
-        let mut request_builder = self.client.request(method, req_data.url).headers(headers);
-        if let Some(body) = req_data.body {
-            request_builder = request_builder.body(body);
+        let mut request_builder = self.client.request(method, parsed_url).headers(headers);
+
+        if req_data.body.body_type != BodyType::None {
+            if let Some(raw_body) = req_data.body.content {
+                let parsed_body = self.parser.parse_string(&raw_body, active_env);
+                request_builder = request_builder.body(parsed_body);
+            }
         }
 
         let response = request_builder.send().await?;

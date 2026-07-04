@@ -1,16 +1,67 @@
-use crate::models::ApiRequest;
-use sled::Db;
+use crate::models::{ApiRequest, Collection, Environment};
+use sled::{Db, Tree};
 use std::error::Error;
 
 pub struct StorageManager {
-    db: Db,
+    _db: Db, // Keep the root db alive
+    requests_tree: Tree,
+    collections_tree: Tree,
+    environments_tree: Tree,
 }
 
 impl StorageManager {
     /// Opens or creates a new sled database at the given path
     pub fn new(path: &str) -> Result<Self, sled::Error> {
         let db = sled::open(path)?;
-        Ok(Self { db })
+
+        // Create isolated namespaces (trees) for different data types
+        let requests_tree = db.open_tree(b"requests")?;
+        let collections_tree = db.open_tree(b"collections")?;
+        let environments_tree = db.open_tree(b"environments")?;
+
+        Ok(Self {
+            _db: db,
+            requests_tree,
+            collections_tree,
+            environments_tree,
+        })
+    }
+
+    // --- ENVIRONMENT STORAGE ---
+
+    pub fn save_environment(&self, env: &Environment) -> Result<(), Box<dyn Error>> {
+        let value = serde_json::to_vec(env)?;
+        self.environments_tree.insert(env.id.as_bytes(), value)?;
+        self.environments_tree.flush()?;
+
+        Ok(())
+    }
+
+    pub fn get_environment(&self, id: &str) -> Result<Option<Environment>, Box<dyn Error>> {
+        if let Some(bytes) = self.environments_tree.get(id.as_bytes())? {
+            Ok(Some(serde_json::from_slice(&bytes)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // --- COLLECTION STORAGE ---
+
+    pub fn save_collection(&self, collection: &Collection) -> Result<(), Box<dyn Error>> {
+        let value = serde_json::to_vec(collection)?;
+        self.collections_tree
+            .insert(collection.id.as_bytes(), value)?;
+        self.collections_tree.flush()?;
+
+        Ok(())
+    }
+
+    pub fn get_collection(&self, id: &str) -> Result<Option<Collection>, Box<dyn Error>> {
+        if let Some(bytes) = self.collections_tree.get(id.as_bytes())? {
+            Ok(Some(serde_json::from_slice(&bytes)?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Serializes an ApiRequest to JSON and saves it to sled
@@ -22,17 +73,17 @@ impl StorageManager {
         let value = serde_json::to_vec(request)?;
 
         // Insert the key-value pair into the database
-        self.db.insert(key, value)?;
+        self.requests_tree.insert(key, value)?;
 
         // Ensure the data is flushed to disk safely
-        self.db.flush()?;
+        self.requests_tree.flush()?;
 
         Ok(())
     }
 
     /// Retrieves an ApiRequest by its ID and deserializes it back into a Rust struct
     pub fn get_request(&self, id: &str) -> Result<Option<ApiRequest>, Box<dyn Error>> {
-        let result = self.db.get(id.as_bytes())?;
+        let result = self.requests_tree.get(id.as_bytes())?;
 
         match result {
             Some(bytes) => {
@@ -49,7 +100,7 @@ impl StorageManager {
         let mut requests = Vec::new();
 
         // Iterate through all key-value pairs in the database
-        for item in self.db.iter() {
+        for item in self.requests_tree.iter() {
             let (_, value) = item?;
             let request: ApiRequest = serde_json::from_slice(&value)?;
             requests.push(request);

@@ -1,5 +1,6 @@
 mod engine;
 mod models;
+mod parser;
 mod storage;
 
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 use engine::HttpManager;
 
 use crate::{
-    models::{ApiRequest, HttpMethod},
+    models::{ApiRequest, BodyType, EnvVariable, Environment, HttpMethod, RequestBody},
     storage::StorageManager,
 };
 
@@ -17,14 +18,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http = HttpManager::new();
     let storage = StorageManager::new(".requestui_db")?;
 
+    let my_env = Environment {
+        id: "env_1".to_string(),
+        name: "Production".to_string(),
+        variables: vec![
+            EnvVariable {
+                key: "base_url".to_string(),
+                value: "https://jsonplaceholder.typicode.com".to_string(),
+                enabled: true,
+            },
+            EnvVariable {
+                key: "user_id".to_string(),
+                value: "1".to_string(),
+                enabled: true,
+            },
+        ],
+    };
+
     // 2. Create a mock request
     let my_request = ApiRequest {
         id: "req_123".to_string(),
         name: "Fetch ToDos".to_string(),
-        url: "https://jsonplaceholder.typicode.com/todos/1".to_string(),
+        url: "{{base_url}}/users/{{user_id}}".to_string(),
         method: HttpMethod::GET,
         headers: HashMap::new(),
-        body: None,
+        query_params: HashMap::new(),
+        body: RequestBody {
+            body_type: BodyType::None,
+            content: None,
+        },
     };
 
     // 3. Save the request to Sled
@@ -37,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 5. Fire the request via Reqwest
         println!("Executing request...");
-        let response = http.execute(loadded_req).await?;
+        let response = http.execute(loadded_req, Some(&my_env)).await?;
 
         println!("Status: {}", response.status_code);
         println!("Response Time: {}ms", response.duration_ms);
