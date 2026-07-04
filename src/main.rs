@@ -1,7 +1,9 @@
+mod app;
 mod engine;
 mod models;
 mod parser;
 mod storage;
+mod ui;
 
 use std::collections::HashMap;
 
