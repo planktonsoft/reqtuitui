@@ -1,4 +1,4 @@
-use crate::models::{ApiRequest, ApiResponse};
+use crate::models::{ApiRequest, ApiResponse, EnvVariable, Environment};
 use tui_input::Input;
 use tui_textarea::TextArea;
 
@@ -17,7 +17,7 @@ pub enum CurrentScreen {
 
 /// Messages sent from the TUI to the background HTTP worker
 pub enum WorkMessage {
-    RunRequest(ApiRequest),
+    RunRequest(ApiRequest, Option<Environment>),
 }
 
 /// Messages sent from the background HTTP worker back to the TUI
@@ -36,10 +36,18 @@ pub struct App<'a> {
     pub active_response: Option<ApiResponse>,
     pub is_loading: bool,
     pub status_message: Option<String>,
+
+    // --- Environment State ---
+    pub environments: Vec<Environment>,
+    pub active_env_idx: Option<usize>, // None means "No Environment"
+
+    // --- Popup State ---
+    pub env_popup_open: bool,
+    pub env_popup_selected_idx: usize,
 }
 
 impl<'a> App<'a> {
-    pub fn new(initial_requests: Vec<ApiRequest>) -> Self {
+    pub fn new(initial_requests: Vec<ApiRequest>, initial_envs: Vec<Environment>) -> Self {
         let active_req = initial_requests.first();
         let initial_url = active_req.map(|r| r.url.clone()).unwrap_or_default();
 
@@ -63,6 +71,10 @@ impl<'a> App<'a> {
             status_message: Some(
                 "Ready. Press Tab to navigate, Enter to send, Ctrl+S to save.".to_string(),
             ),
+            environments: initial_envs,
+            active_env_idx: None,
+            env_popup_open: false,
+            env_popup_selected_idx: 0,
         }
     }
 }

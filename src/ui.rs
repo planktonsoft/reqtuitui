@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use crate::app::{App, Focus};
@@ -16,6 +16,70 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     render_sidebar(f, app, main_chunks[0]);
     render_main_panel(f, app, main_chunks[1]);
+
+    if app.env_popup_open {
+        render_env_popup(f, app);
+    }
+}
+
+// Helper function to create a centered rectangle for out popup
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+fn render_env_popup(f: &mut Frame, app: &App) {
+    let area = centered_rect(40, 40, f.area());
+
+    // Clear the background behind the popup
+    f.render_widget(Clear, area);
+
+    // Build the list of environments
+    let mut items: Vec<ListItem> = vec![ListItem::new("No Environment")];
+
+    for env in &app.environments {
+        items.push(ListItem::new(env.name.clone()));
+    }
+
+    // Highlight the currently selected item in the popup menu
+    let items = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| {
+            if i == app.env_popup_selected_idx {
+                item.style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::REVERSED),
+                )
+            } else {
+                item
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(" Select Environment (ESC to cancel) ")
+            .borders(Borders::ALL),
+    );
+
+    f.render_widget(list, area);
 }
 
 fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {

@@ -29,23 +29,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = StorageManager::new(".requestui_db")?;
 
     // For demonstration, pull from Sled or fallback to a default mock vector
+    let mock_envs = vec![
+        models::Environment {
+            id: "env_1".into(),
+            name: "Local Dev".into(),
+            variables: vec![models::EnvVariable {
+                key: "base_url".into(),
+                value: "http://localhost:8080".into(),
+                enabled: true,
+            }],
+        },
+        models::Environment {
+            id: "env_2".into(),
+            name: "Production".into(),
+            variables: vec![models::EnvVariable {
+                key: "base_url".into(),
+                value: "https://jsonplaceholder.typicode.com".into(),
+                enabled: true,
+            }],
+        },
+    ];
     let mock_requests = storage.get_all_requests().unwrap_or_default();
-    let mut app = App::new(if mock_requests.is_empty() {
-        vec![models::ApiRequest {
-            id: "1".into(),
-            name: "Get JSON data".into(),
-            url: "https://jsonplaceholder.typicode.com/posts/1".into(),
-            method: models::HttpMethod::GET,
-            headers: std::collections::HashMap::new(),
-            query_params: std::collections::HashMap::new(),
-            body: models::RequestBody {
-                body_type: models::BodyType::None,
-                content: None,
-            },
-        }]
-    } else {
-        mock_requests
-    });
+    let mut app = App::new(
+        if mock_requests.is_empty() {
+            vec![models::ApiRequest {
+                id: "1".into(),
+                name: "Get JSON data".into(),
+                url: "{{base_url}}/posts/1".into(),
+                method: models::HttpMethod::GET,
+                headers: std::collections::HashMap::new(),
+                query_params: std::collections::HashMap::new(),
+                body: models::RequestBody {
+                    body_type: models::BodyType::None,
+                    content: None,
+                },
+            }]
+        } else {
+            mock_requests
+        },
+        mock_envs,
+    );
 
     // 2. Setup Channels for Inter-Thread Communication
     let (tx_worker, mut rx_worker) = mpsc::channel::<WorkMessage>(100);
@@ -56,11 +79,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         while let Some(message) = rx_worker.recv().await {
             match message {
-                WorkMessage::RunRequest(req) => {
+                WorkMessage::RunRequest(req, env) => {
                     let _ = tx_ui.send(UiMessage::RequestStarted).await;
-                    // Execute with no active environment mapping for now
                     match http_manager
-                        .execute(req, None)
+                        .execute(req, env.as_ref())
                         .await
                         .map_err(|e| e.to_string())
                     {
@@ -89,6 +111,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Non-blocking poll for user input events
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                // --- POPUP INTERCEPTOR ---
+                // If the popup is open, handle its logic and IGNORE everything else.
+                if app.env_popup_open {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.env_popup_open = false; // Close without saving
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            // Max index is environemtns.len() because index 0 is "No Environment"
+                            if app.env_popup_selected_idx < app.environments.len() {
+                                app.env_popup_selected_idx += 1;
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.env_popup_selected_idx > 0 {
+                                app.env_popup_selected_idx -= 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            // Set the active environment based on selection
+                            if app.env_popup_selected_idx == 0 {
+                                app.active_env_idx = None;
+                                app.status_message = Some("🌍 Environment cleared.".to_string());
+                            } else {
+                                app.active_env_idx = Some(app.env_popup_selected_idx - 1);
+                                app.status_message = Some(format!(
+                                    "🌍 Switched to environment: {}",
+                                    app.environments[app.active_env_idx.unwrap()].name
+                                ));
+                            }
+                            app.env_popup_open = false; // Close the popup
+                        }
+                        _ => {}
+                    }
+                    continue; // CRITICAL: Skip the rest of the UI logic while popup is open!
+                }
+
                 // --- GLOBAL TAB NAVIGATION ---
                 if key.code == KeyCode::Tab {
                     app.focus = match app.focus {
@@ -96,6 +155,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Focus::UrlBar => Focus::BodyEditor,
                         Focus::BodyEditor => Focus::Sidebar,
                     };
+                    continue;
+                }
+
+                if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    app.env_popup_open = true;
+                    // Reset the popup cursor to the currently active environment
+                    app.env_popup_selected_idx = app.active_env_idx.map(|idx| idx + 1).unwrap_or(0);
                     continue;
                 }
 
@@ -154,7 +220,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let mut active_req = app.requests[app.selected_request_idx].clone();
                                 active_req.url = app.url_input.value().to_string();
                                 active_req.body.content = Some(app.body_input.lines().join("\n"));
-                                tx_worker.send(WorkMessage::RunRequest(active_req)).await?;
+
+                                // Grab a clone of the active environment, if one is selected
+                                let active_env =
+                                    app.active_env_idx.map(|idx| app.environments[idx].clone());
+                                tx_worker
+                                    .send(WorkMessage::RunRequest(active_req, active_env))
+                                    .await?;
                             }
                             KeyCode::Char('e') => {
                                 // Press 'e' to Edit the URL
@@ -201,8 +273,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 UiMessage::RequestCompleted(res) => {
                     app.is_loading = false;
-                    if let Ok(resp) = res {
-                        app.active_response = Some(resp);
+                    match res {
+                        Ok(resp) => app.active_response = Some(resp),
+                        Err(e) => app.status_message = Some(format!("❌ Error: {}", e)),
                     }
                 }
             }
