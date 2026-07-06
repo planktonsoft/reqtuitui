@@ -50,8 +50,9 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // URL Bar
-            Constraint::Min(10),        // Body Editor (takes at least 10 lines)
+            Constraint::Min(5),         // Body Editor (takes at least 10 lines)
             Constraint::Percentage(50), // Response (takes remaining bottom half)
+            Constraint::Length(1),      // Status Bar (Bottom line)
         ])
         .split(area);
 
@@ -114,4 +115,10 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
     let response_block = Paragraph::new(response_content)
         .block(Block::default().title(" Response ").borders(Borders::ALL));
     f.render_widget(response_block, chunks[2]);
+
+    let status_text = app.status_message.as_deref().unwrap_or("");
+    let status_bar =
+        Paragraph::new(status_text).style(Style::default().bg(Color::Blue).fg(Color::White));
+
+    f.render_widget(status_bar, chunks[3]);
 }

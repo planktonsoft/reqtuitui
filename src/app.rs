@@ -35,6 +35,7 @@ pub struct App<'a> {
     pub body_input: TextArea<'a>,
     pub active_response: Option<ApiResponse>,
     pub is_loading: bool,
+    pub status_message: Option<String>,
 }
 
 impl<'a> App<'a> {
@@ -59,6 +60,9 @@ impl<'a> App<'a> {
             body_input,
             active_response: None,
             is_loading: false,
+            status_message: Some(
+                "Ready. Press Tab to navigate, Enter to send, Ctrl+S to save.".to_string(),
+            ),
         }
     }
 }

@@ -5,7 +5,7 @@ mod parser;
 mod storage;
 mod ui;
 
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -97,6 +97,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Focus::BodyEditor => Focus::Sidebar,
                     };
                     continue;
+                }
+
+                if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    // Step A: Get a mutable reference to the active request
+                    let active_idx = app.selected_request_idx;
+                    let mut request_to_save = app.requests[active_idx].clone();
+
+                    // Step B: Sync the UI text fields into the request struct
+                    request_to_save.url = app.url_input.value().to_string();
+                    request_to_save.body.content = Some(app.body_input.lines().join("\n"));
+
+                    // Step C: Save it to our Sled database!
+                    // (Because Sled is synchronous and very fast, doing this directly in the UI thread is fine)
+                    match storage.save_request(&request_to_save) {
+                        Ok(_) => {
+                            // Update the app's in-memory array so the sidebar reflects changes
+                            app.requests[active_idx] = request_to_save;
+                            app.status_message = Some("💾 Request saved successfully!".to_string());
+                        }
+                        Err(e) => {
+                            app.status_message = Some(format!("❌ Failed to save: {}", e));
+                        }
+                    }
+                    continue; // Skip the rest of the key handling
                 }
 
                 // --- PANE-SPECIFIC CONTROLS ---
