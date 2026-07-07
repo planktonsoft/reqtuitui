@@ -3,7 +3,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 
 use crate::app::{App, Focus};
@@ -116,8 +119,9 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // URL Bar
-            Constraint::Min(5),         // Body Editor (takes at least 10 lines)
-            Constraint::Percentage(50), // Response (takes remaining bottom half)
+            Constraint::Length(6),      // Headers Editor (Fixed height)
+            Constraint::Min(6),         // Body Editor (takes at least 10 lines)
+            Constraint::Percentage(45), // Response (takes remaining bottom half)
             Constraint::Length(1),      // Status Bar (Bottom line)
         ])
         .split(area);
@@ -148,6 +152,20 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
         });
     }
 
+    let headers_style = if app.focus == Focus::HeadersEditor {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+
+    app.headers_input.set_block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(headers_style)
+            .title(" Headers (Format: `Key: Value`) "),
+    );
+    f.render_widget(&app.headers_input, chunks[1]);
+
     let body_style = if app.focus == Focus::BodyEditor {
         Style::default().fg(Color::Yellow)
     } else {
@@ -164,7 +182,7 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
             )),
     );
 
-    f.render_widget(&app.body_input, chunks[1]);
+    f.render_widget(&app.body_input, chunks[2]);
 
     // Bottom: Response Area
     let response_content = if app.is_loading {
@@ -187,7 +205,7 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let content_len = response_content.lines.len();
-    
+
     let response_block = Paragraph::new(response_content)
         .block(
             Block::default()
@@ -195,7 +213,7 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 .borders(Borders::ALL),
         )
         .scroll((app.response_scroll, 0));
-    f.render_widget(response_block, chunks[2]);
+    f.render_widget(response_block, chunks[3]);
 
     let mut scrollbar_state = ScrollbarState::default()
         .content_length(content_len)
@@ -206,7 +224,7 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
             .orientation(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("▲"))
             .end_symbol(Some("▼")),
-        chunks[2],
+        chunks[3],
         &mut scrollbar_state,
     );
 
@@ -214,5 +232,5 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
     let status_bar =
         Paragraph::new(status_text).style(Style::default().bg(Color::Blue).fg(Color::White));
 
-    f.render_widget(status_bar, chunks[3]);
+    f.render_widget(status_bar, chunks[4]);
 }

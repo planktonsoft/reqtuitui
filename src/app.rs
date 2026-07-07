@@ -6,6 +6,7 @@ use tui_textarea::TextArea;
 pub enum Focus {
     Sidebar,
     UrlBar,
+    HeadersEditor,
     BodyEditor,
 }
 
@@ -32,6 +33,7 @@ pub struct App<'a> {
     pub requests: Vec<ApiRequest>,
     pub selected_request_idx: usize,
     pub url_input: Input,
+    pub headers_input: TextArea<'a>,
     pub body_input: TextArea<'a>,
     pub active_response: Option<ApiResponse>,
     pub is_loading: bool,
@@ -52,6 +54,17 @@ impl<'a> App<'a> {
         let active_req = initial_requests.first();
         let initial_url = active_req.map(|r| r.url.clone()).unwrap_or_default();
 
+        // Format existing headers into a "Key: Value" string block
+        let mut headers_input = TextArea::default();
+        if let Some(req) = active_req {
+            let header_lines: Vec<String> = req
+                .headers
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect();
+            headers_input = TextArea::new(header_lines);
+        }
+
         // Load the existing body content into the text area
         let mut body_input = TextArea::default();
         if let Some(req) = active_req {
@@ -66,6 +79,7 @@ impl<'a> App<'a> {
             requests: initial_requests,
             selected_request_idx: 0,
             url_input: Input::default().with_value(initial_url),
+            headers_input,
             body_input,
             active_response: None,
             is_loading: false,

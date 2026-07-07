@@ -13,6 +13,7 @@ use crossterm::terminal::{
 };
 use engine::HttpManager;
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::collections::HashMap;
 use std::time::Duration;
 use std::{io, sync::Arc};
 use tokio::sync::mpsc;
@@ -174,7 +175,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if key.code == KeyCode::Tab {
                     app.focus = match app.focus {
                         Focus::Sidebar => Focus::UrlBar,
-                        Focus::UrlBar => Focus::BodyEditor,
+                        Focus::UrlBar => Focus::HeadersEditor,
+                        Focus::HeadersEditor => Focus::BodyEditor,
                         Focus::BodyEditor => Focus::Sidebar,
                     };
                     continue;
@@ -194,6 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Step B: Sync the UI text fields into the request struct
                     request_to_save.url = app.url_input.value().to_string();
+                    request_to_save.headers = parse_headers_from_ui(app.headers_input.lines());
                     request_to_save.body.content = Some(app.body_input.lines().join("\n"));
 
                     // Step C: Save it to our Sled database!
@@ -223,6 +226,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     app.url_input =
                                         app.url_input.clone().with_value(req.url.clone());
 
+                                    let header_lines: Vec<String> = req
+                                        .headers
+                                        .iter()
+                                        .map(|(k, v)| format!("{}: {}", k, v))
+                                        .collect();
+                                    app.headers_input = tui_textarea::TextArea::new(header_lines);
+
                                     // Update the text area with the new request's body
                                     let body_text = req.body.content.clone().unwrap_or_default();
                                     app.body_input = tui_textarea::TextArea::new(
@@ -233,14 +243,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             KeyCode::Up | KeyCode::Char('k') => {
                                 if app.selected_request_idx > 0 {
                                     app.selected_request_idx -= 1;
-                                    app.url_input = app.url_input.clone().with_value(
-                                        app.requests[app.selected_request_idx].url.clone(),
+                                    let req = &app.requests[app.selected_request_idx];
+                                    app.url_input =
+                                        app.url_input.clone().with_value(req.url.clone());
+
+                                    let header_lines: Vec<String> = req
+                                        .headers
+                                        .iter()
+                                        .map(|(k, v)| format!("{}: {}", k, v))
+                                        .collect();
+                                    app.headers_input = tui_textarea::TextArea::new(header_lines);
+
+                                    // Update the text area with the new request's body
+                                    let body_text = req.body.content.clone().unwrap_or_default();
+                                    app.body_input = tui_textarea::TextArea::new(
+                                        body_text.lines().map(String::from).collect(),
                                     );
                                 }
                             }
                             KeyCode::Enter => {
                                 let mut active_req = app.requests[app.selected_request_idx].clone();
                                 active_req.url = app.url_input.value().to_string();
+                                active_req.headers =
+                                    parse_headers_from_ui(app.headers_input.lines());
                                 active_req.body.content = Some(app.body_input.lines().join("\n"));
 
                                 // Grab a clone of the active environment, if one is selected
@@ -273,6 +298,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // Pass all other keys (letters, backspace, arrows) directly to the
                             // input handler!
                             app.url_input.handle_event(&Event::Key(key));
+                        }
+                    },
+                    Focus::HeadersEditor => match key.code {
+                        KeyCode::Esc => app.focus = Focus::Sidebar,
+                        _ => {
+                            app.headers_input.input(key);
                         }
                     },
                     Focus::BodyEditor => match key.code {
@@ -319,4 +350,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+fn parse_headers_from_ui(lines: &[String]) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    for line in lines {
+        // Find the first colon to separate Key from Value
+        if let Some((key, value)) = line.split_once(':') {
+            let k = key.trim().to_string();
+            let v = value.trim().to_string();
+            if !k.is_empty() {
+                headers.insert(k, v);
+            }
+        }
+    }
+    headers
 }
