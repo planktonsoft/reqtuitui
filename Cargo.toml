@@ -15,3 +15,4 @@ sled = "0.34.7"
 tokio = { version = "1.52.3", features = ["full"] }
 tui-input = "0.14"
 tui-textarea = "0.7.0"
+uuid = { version = "1.23.4", features = ["v4"] }
