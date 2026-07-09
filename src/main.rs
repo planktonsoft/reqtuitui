@@ -20,8 +20,10 @@ use tokio::sync::mpsc;
 use tui_input::backend::crossterm::EventHandler;
 use uuid::Uuid;
 
-use crate::app::{CurrentScreen, Focus};
-use crate::models::{ApiRequest, BodyType, HttpMethod, RequestBody};
+use crate::app::{CurrentScreen, Focus, NodeType};
+use crate::models::{
+    ApiRequest, BodyType, Collection, CollectionItem, Folder, HttpMethod, RequestBody,
+};
 use crate::{
     app::{App, UiMessage, WorkMessage},
     storage::StorageManager,
@@ -53,10 +55,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }],
         },
     ];
-    let mock_requests = storage.get_all_requests().unwrap_or_default();
-    let mut app = App::new(
-        if mock_requests.is_empty() {
-            vec![models::ApiRequest {
+    //let mock_requests = storage.get_all_requests().unwrap_or_default();
+    let my_workspace = Collection {
+        id: "col_1".into(),
+        name: "My Workspace".into(),
+        description: None,
+        items: vec![CollectionItem::Folder(Folder {
+            id: "f_1".into(),
+            name: "User API".into(),
+            items: vec![CollectionItem::Request(ApiRequest {
                 id: "1".into(),
                 name: "Get JSON data".into(),
                 url: "{{base_url}}/posts/1".into(),
@@ -67,12 +74,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     body_type: models::BodyType::None,
                     content: None,
                 },
-            }]
-        } else {
-            mock_requests
-        },
-        mock_envs,
-    );
+            })],
+        })],
+    };
+
+    let mut app = App::new(my_workspace, mock_envs);
 
     // 2. Setup Channels for Inter-Thread Communication
     let (tx_worker, mut rx_worker) = mpsc::channel::<WorkMessage>(100);
@@ -161,21 +167,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.rename_popup_open = false;
                         }
                         KeyCode::Enter => {
-                            // Save the new name
-                            let active_idx = app.selected_request_idx;
-                            app.requests[active_idx].name = app.rename_input.value().to_string();
+                            let nodes = app.get_visible_nodes();
+                            if let Some(active_node) = nodes.get(app.selected_node_idx) {
+                                let new_name = app.rename_input.value().to_string();
 
-                            // Immediately save the updated request to the sled database
-                            let request_to_save = app.requests[active_idx].clone();
-                            match storage.save_request(&request_to_save) {
-                                Ok(_) => {
-                                    app.status_message = Some("✅ Request renamed.".to_string())
-                                }
-                                Err(e) => {
-                                    app.status_message = Some(format!("❌ Save failed: {}", e))
+                                // 1. Update the tree structure
+                                app.rename_node(&active_node.id, &new_name);
+
+                                // 2. Persist the entire collection to Sled
+                                match storage.save_collection(&app.root_collection) {
+                                    Ok(_) => {
+                                        app.status_message =
+                                            Some("✅ Node renamed successfully.".to_string())
+                                    }
+                                    Err(e) => {
+                                        app.status_message = Some(format!("❌ Save failed: {}", e))
+                                    }
                                 }
                             }
-
                             app.rename_popup_open = false; // Close popup
                         }
                         _ => {
@@ -223,28 +232,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if key.code == KeyCode::Char('s') && is_ctrl {
-                    // Step A: Get a mutable reference to the active request
-                    let active_idx = app.selected_request_idx;
-                    let mut request_to_save = app.requests[active_idx].clone();
+                    let nodes = app.get_visible_nodes();
+                    if nodes.is_empty() {
+                        continue;
+                    }
 
-                    // Step B: Sync the UI text fields into the request struct
-                    request_to_save.url = app.url_input.value().to_string();
-                    request_to_save.headers = parse_headers_from_ui(app.headers_input.lines());
-                    request_to_save.body.content = Some(app.body_input.lines().join("\n"));
+                    // Only allow saving if we are actually nighlighting a Request (not a folder)
+                    if let NodeType::Request(req) = &nodes[app.selected_node_idx].node_type {
+                        let mut request_to_save = req.clone();
 
-                    // Step C: Save it to our Sled database!
-                    // (Because Sled is synchronous and very fast, doing this directly in the UI thread is fine)
-                    match storage.save_request(&request_to_save) {
-                        Ok(_) => {
-                            // Update the app's in-memory array so the sidebar reflects changes
-                            app.requests[active_idx] = request_to_save;
-                            app.status_message = Some("💾 Request saved successfully!".to_string());
-                        }
-                        Err(e) => {
-                            app.status_message = Some(format!("❌ Failed to save: {}", e));
+                        request_to_save.url = app.url_input.value().to_string();
+                        request_to_save.headers = parse_headers_from_ui(app.headers_input.lines());
+                        request_to_save.body.content = Some(app.body_input.lines().join("\n"));
+                        request_to_save.name = req.name.clone();
+
+                        // Update the item deep inside the nested Collection AST
+                        app.update_request_in_tree(&request_to_save);
+
+                        // Save the ENTIRE updated collection to Sled!
+                        match storage.save_collection(&app.root_collection) {
+                            Ok(_) => app.status_message = Some("💾 Collection saved!".to_string()),
+                            Err(e) => {
+                                app.status_message = Some(format!("❌ Failed to save: {}", e))
+                            }
                         }
                     }
-                    continue; // Skip the rest of the key handling
+
+                    continue;
                 }
 
                 if key.code == KeyCode::Char('n') && is_ctrl {
@@ -261,54 +275,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             content: None,
                         },
                     };
-                    // 1. Save it directly to the database
-                    if let Err(e) = storage.save_request(&blank_request) {
-                        app.status_message = Some(format!("❌ Failed to create request: {}", e));
+
+                    app.add_new_request(blank_request);
+
+                    if let Err(e) = storage.save_collection(&app.root_collection) {
+                        app.status_message = Some(format!("❌ Save failed: {}", e));
                         continue;
                     }
-                    // 2. Add it to out UI state
-                    app.requests.push(blank_request);
 
                     // 3. Move the user's cursor to the very bottom of the list
-                    app.selected_request_idx = app.requests.len() - 1;
+                    let nodes = app.get_visible_nodes();
+                    if let Some(new_idx) = nodes.iter().position(|n| n.id == new_id) {
+                        app.selected_node_idx = new_idx;
+                    }
 
-                    // 4. Sync the input fields to the new blank request
-                    let req = &app.requests[app.selected_request_idx];
-                    app.url_input = app.url_input.clone().with_value(req.url.clone());
-                    app.headers_input = tui_textarea::TextArea::default();
-                    app.body_input = tui_textarea::TextArea::default();
-                    app.active_response = None;
+                    // 4. Sync the text fields beautifully
+                    app.sync_ui_to_selected_node();
+
                     app.status_message = Some("✨ New request created!".to_string());
 
                     continue;
                 }
 
                 if key.code == KeyCode::Char('y') && is_ctrl {
-                    let active_idx = app.selected_request_idx;
+                    let nodes = app.get_visible_nodes();
 
-                    // Cycle the method of the active request
-                    app.requests[active_idx].method = match app.requests[active_idx].method {
-                        HttpMethod::GET => HttpMethod::POST,
-                        HttpMethod::POST => HttpMethod::PUT,
-                        HttpMethod::PUT => HttpMethod::DELETE,
-                        HttpMethod::DELETE => HttpMethod::PATCH,
-                        HttpMethod::PATCH => HttpMethod::GET,
-                        _ => HttpMethod::GET,
-                    };
+                    if let Some(active_node) = nodes.get(app.selected_node_idx) {
+                        // Only allow method cycling if it's a Request!
+                        if let NodeType::Request(req) = &active_node.node_type {
+                            let mut updated_req = req.clone();
 
-                    app.status_message = Some(format!(
-                        "🔄 Method changed to {:?}",
-                        app.requests[active_idx].method
-                    ));
+                            // Cycle the method of the active request
+                            updated_req.method = match req.method {
+                                HttpMethod::GET => HttpMethod::POST,
+                                HttpMethod::POST => HttpMethod::PUT,
+                                HttpMethod::PUT => HttpMethod::DELETE,
+                                HttpMethod::DELETE => HttpMethod::PATCH,
+                                HttpMethod::PATCH => HttpMethod::GET,
+                                _ => HttpMethod::GET,
+                            };
+
+                            updated_req.url = app.url_input.value().to_string();
+                            updated_req.headers = parse_headers_from_ui(app.headers_input.lines());
+                            updated_req.body.content = Some(app.body_input.lines().join("\n"));
+
+                            app.update_request_in_tree(&updated_req);
+
+                            let _ = storage.save_collection(&app.root_collection);
+
+                            app.status_message =
+                                Some(format!("🔄 Method changed to {:?}", updated_req.method));
+                        } else {
+                            app.status_message =
+                                Some("⚠️ Cannot change HTTP method of a folder.".to_string());
+                        }
+                    }
+
                     continue;
                 }
 
                 if key.code == KeyCode::Char('r') && is_ctrl {
-                    app.rename_popup_open = true;
+                    // 1. Get the flattened view of the tree
+                    let nodes = app.get_visible_nodes();
 
-                    // Pre-fill the input box with the current request's name
-                    let current_name = app.requests[app.selected_request_idx].name.clone();
-                    app.rename_input = tui_input::Input::default().with_value(current_name);
+                    // 2. Safely grab the currently highlighted node
+                    if let Some(active_node) = nodes.get(app.selected_node_idx) {
+                        app.rename_popup_open = true;
+
+                        let current_name = active_node.name.clone();
+                        app.rename_input = tui_input::Input::default().with_value(current_name);
+                    }
 
                     continue;
                 }
@@ -319,103 +355,89 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         match key.code {
                             KeyCode::Char('q') => app.current_screen = CurrentScreen::Exiting,
                             KeyCode::Down | KeyCode::Char('j') => {
-                                if app.selected_request_idx < app.requests.len().saturating_sub(1) {
-                                    app.selected_request_idx += 1;
-                                    let req = &app.requests[app.selected_request_idx];
-                                    app.url_input =
-                                        app.url_input.clone().with_value(req.url.clone());
+                                let nodes = app.get_visible_nodes();
+                                if app.selected_node_idx < nodes.len().saturating_sub(1) {
+                                    app.selected_node_idx += 1;
 
-                                    let header_lines: Vec<String> = req
-                                        .headers
-                                        .iter()
-                                        .map(|(k, v)| format!("{}: {}", k, v))
-                                        .collect();
-                                    app.headers_input = tui_textarea::TextArea::new(header_lines);
-
-                                    // Update the text area with the new request's body
-                                    let body_text = req.body.content.clone().unwrap_or_default();
-                                    app.body_input = tui_textarea::TextArea::new(
-                                        body_text.lines().map(String::from).collect(),
-                                    );
+                                    app.sync_ui_to_selected_node();
                                 }
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
-                                if app.selected_request_idx > 0 {
-                                    app.selected_request_idx -= 1;
-                                    let req = &app.requests[app.selected_request_idx];
-                                    app.url_input =
-                                        app.url_input.clone().with_value(req.url.clone());
+                                if app.selected_node_idx > 0 {
+                                    app.selected_node_idx -= 1;
 
-                                    let header_lines: Vec<String> = req
-                                        .headers
-                                        .iter()
-                                        .map(|(k, v)| format!("{}: {}", k, v))
-                                        .collect();
-                                    app.headers_input = tui_textarea::TextArea::new(header_lines);
-
-                                    // Update the text area with the new request's body
-                                    let body_text = req.body.content.clone().unwrap_or_default();
-                                    app.body_input = tui_textarea::TextArea::new(
-                                        body_text.lines().map(String::from).collect(),
-                                    );
+                                    app.sync_ui_to_selected_node();
                                 }
                             }
                             KeyCode::Enter => {
-                                let mut active_req = app.requests[app.selected_request_idx].clone();
-                                active_req.url = app.url_input.value().to_string();
-                                active_req.headers =
-                                    parse_headers_from_ui(app.headers_input.lines());
-                                active_req.body.content = Some(app.body_input.lines().join("\n"));
+                                let nodes = app.get_visible_nodes();
+                                if nodes.is_empty() {
+                                    continue;
+                                }
 
-                                // Grab a clone of the active environment, if one is selected
-                                let active_env =
-                                    app.active_env_idx.map(|idx| app.environments[idx].clone());
-                                tx_worker
-                                    .send(WorkMessage::RunRequest(active_req, active_env))
-                                    .await?;
+                                let active_node = &nodes[app.selected_node_idx];
+
+                                match &active_node.node_type {
+                                    NodeType::Folder { expended } => {
+                                        // It's a folder! Toggle its state in our HashSet.
+                                        if *expended {
+                                            app.expanded_folders.remove(&active_node.id);
+                                        } else {
+                                            app.expanded_folders.insert(active_node.id.clone());
+                                        }
+                                    }
+                                    NodeType::Request(req) => {
+                                        // It's a request! Build it and fire it.
+                                        let mut active_req = req.clone();
+                                        active_req.url = app.url_input.value().to_string();
+                                        active_req.headers =
+                                            parse_headers_from_ui(app.headers_input.lines());
+                                        active_req.body.content =
+                                            Some(app.body_input.lines().join("\n"));
+
+                                        // Grab a clone of the active environment, if one is selected
+                                        let active_env = app
+                                            .active_env_idx
+                                            .map(|idx| app.environments[idx].clone());
+                                        tx_worker
+                                            .send(WorkMessage::RunRequest(active_req, active_env))
+                                            .await?;
+                                    }
+                                }
                             }
                             KeyCode::Char('e') => {
                                 // Press 'e' to Edit the URL
                                 app.focus = Focus::UrlBar;
                             }
                             KeyCode::Delete | KeyCode::Backspace => {
-                                // Do not delete if it is the very last request we have open
-                                if app.requests.len() > 1 {
-                                    let active_idx = app.selected_request_idx;
-                                    let request_to_delete = &app.requests[active_idx];
-
-                                    let _ = storage.delete_request(&request_to_delete.id);
-
-                                    // Remove from the UI state
-                                    app.requests.remove(active_idx);
-
-                                    // Adjust the index so we do not go out of bounds
-                                    if app.selected_request_idx >= app.requests.len() {
-                                        app.selected_request_idx = app.requests.len() - 1;
-                                    }
-
-                                    // Sync the UI fields with the new selected request
-                                    let req = &app.requests[app.selected_request_idx];
-                                    app.url_input =
-                                        app.url_input.clone().with_value(req.url.clone());
-
-                                    let header_lines: Vec<String> = req
-                                        .headers
-                                        .iter()
-                                        .map(|(k, v)| format!("{}: {}", k, v))
-                                        .collect();
-                                    app.headers_input = tui_textarea::TextArea::new(header_lines);
-
-                                    // Update the text area with the new request's body
-                                    let body_text = req.body.content.clone().unwrap_or_default();
-                                    app.body_input = tui_textarea::TextArea::new(
-                                        body_text.lines().map(String::from).collect(),
-                                    );
-                                    app.status_message = Some("🗑️ Request deleted.".to_string());
-                                } else {
-                                    app.status_message =
-                                        Some("⚠️ Cannot delete the last request.".to_string());
+                                let nodes = app.get_visible_nodes();
+                                if nodes.is_empty() {
+                                    continue;
                                 }
+
+                                let active_node = &nodes[app.selected_node_idx];
+                                let target_id = active_node.id.clone();
+
+                                // 1. Delete from our memory tree
+                                app.delete_node(&target_id);
+
+                                // 2. Save the newly truncated collection to Sled
+                                if let Err(e) = storage.save_collection(&app.root_collection) {
+                                    app.status_message =
+                                        Some(format!("❌ Failed to save after delete: {}", e));
+                                } else {
+                                    app.status_message = Some("🗑️ Item deleted.".to_string());
+                                }
+
+                                // 3. Shift the cursor up so it doesn't crash on out-of-bounds
+                                let updated_nodes = app.get_visible_nodes();
+                                if app.selected_node_idx >= updated_nodes.len() {
+                                    app.selected_node_idx =
+                                        updated_nodes.len().saturating_sub(1);
+                                }
+
+                                // 4. Sync the text editors with whatever item we landed on
+                                app.sync_ui_to_selected_node();
                             }
                             _ => {}
                         }
@@ -427,9 +449,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.focus = Focus::Sidebar;
                         }
                         KeyCode::Enter => {
-                            // Save the URL to our state and go back to sidebar
-                            app.requests[app.selected_request_idx].url =
-                                app.url_input.value().to_string();
+                            // 1. Get the current active node
+                            let nodes = app.get_visible_nodes();
+
+                            if let Some(active_node) = nodes.get(app.selected_node_idx) {
+                                if let NodeType::Request(req) = &active_node.node_type {
+                                    let mut updated_req = req.clone();
+
+                                    // 2. Sync ALL text fields to prevent data loss
+                                    updated_req.url = app.url_input.value().to_string();
+                                    updated_req.headers =
+                                        parse_headers_from_ui(app.headers_input.lines());
+                                    updated_req.body.content =
+                                        Some(app.body_input.lines().join("\n"));
+
+                                    // 3. Update the item deep inside the nested tree
+                                    app.update_request_in_tree(&updated_req);
+
+                                    app.status_message = Some(
+                                        "📝 URL updated in memory. (Ctrl+S to save)".to_string(),
+                                    );
+                                }
+                            }
                             app.focus = Focus::Sidebar;
                         }
                         _ => {

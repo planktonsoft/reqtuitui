@@ -1,6 +1,24 @@
-use crate::models::{ApiRequest, ApiResponse, EnvVariable, Environment};
+use std::collections::HashSet;
+
+use crate::models::{
+    ApiRequest, ApiResponse, Collection, CollectionItem, EnvVariable, Environment,
+};
 use tui_input::Input;
 use tui_textarea::TextArea;
+
+// A helper enum to figure out what type of row we are rendering
+pub enum NodeType {
+    Folder { expended: bool },
+    Request(ApiRequest),
+}
+
+// Represents one visible line in the sidebar
+pub struct VisibleNode {
+    pub id: String,
+    pub name: String,
+    pub depth: usize, // How many spaces to indent
+    pub node_type: NodeType,
+}
 
 #[derive(PartialEq)]
 pub enum Focus {
@@ -30,8 +48,6 @@ pub enum UiMessage {
 pub struct App<'a> {
     pub current_screen: CurrentScreen,
     pub focus: Focus,
-    pub requests: Vec<ApiRequest>,
-    pub selected_request_idx: usize,
     pub url_input: Input,
     pub headers_input: TextArea<'a>,
     pub body_input: TextArea<'a>,
@@ -50,40 +66,24 @@ pub struct App<'a> {
 
     pub rename_popup_open: bool,
     pub rename_input: Input,
+
+    // --- Tree State ---
+    pub root_collection: Collection,
+    pub expanded_folders: HashSet<String>, // Stores IDs of open Folders
+    pub selected_node_idx: usize,          // Replaces selected_request_idx
 }
 
 impl<'a> App<'a> {
-    pub fn new(initial_requests: Vec<ApiRequest>, initial_envs: Vec<Environment>) -> Self {
-        let active_req = initial_requests.first();
-        let initial_url = active_req.map(|r| r.url.clone()).unwrap_or_default();
-
-        // Format existing headers into a "Key: Value" string block
-        let mut headers_input = TextArea::default();
-        if let Some(req) = active_req {
-            let header_lines: Vec<String> = req
-                .headers
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
-                .collect();
-            headers_input = TextArea::new(header_lines);
-        }
-
-        // Load the existing body content into the text area
-        let mut body_input = TextArea::default();
-        if let Some(req) = active_req {
-            if let Some(content) = &req.body.content {
-                // Split the string into lines for the text area
-                body_input = TextArea::new(content.lines().map(|s| s.to_string()).collect());
-            }
-        }
-        Self {
+    pub fn new(root_collection: Collection, initial_envs: Vec<Environment>) -> Self {
+        let mut app = Self {
+            root_collection,
+            expanded_folders: HashSet::new(),
+            selected_node_idx: 0,
             current_screen: CurrentScreen::Sidebar,
             focus: Focus::Sidebar,
-            requests: initial_requests,
-            selected_request_idx: 0,
-            url_input: Input::default().with_value(initial_url),
-            headers_input,
-            body_input,
+            url_input: Input::default(),
+            headers_input: tui_textarea::TextArea::default(),
+            body_input: tui_textarea::TextArea::default(),
             active_response: None,
             is_loading: false,
             status_message: Some(
@@ -96,6 +96,213 @@ impl<'a> App<'a> {
             env_popup_selected_idx: 0,
             rename_popup_open: false,
             rename_input: Input::default(),
+        };
+
+        app.sync_ui_to_selected_node();
+
+        app
+    }
+
+    /// Helper to pull data from the active tree node into the text editors
+    pub fn sync_ui_to_selected_node(&mut self) {
+        let nodes = self.get_visible_nodes();
+
+        // Ensure our index is valid
+        if let Some(active_node) = nodes.get(self.selected_node_idx) {
+            // We only update text areas if the user is highlighting a Request
+            if let NodeType::Request(req) = &active_node.node_type {
+                self.url_input = tui_input::Input::default().with_value(req.url.clone());
+
+                let header_lines: Vec<String> = req
+                    .headers
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                self.headers_input = tui_textarea::TextArea::new(header_lines);
+
+                let body_text = req.body.content.clone().unwrap_or_default();
+                self.body_input =
+                    tui_textarea::TextArea::new(body_text.lines().map(String::from).collect());
+            } else {
+                // If they highligh a folder, we can clear the inputs to avoid confusion
+                self.url_input = tui_input::Input::default();
+                self.headers_input = tui_textarea::TextArea::default();
+                self.body_input = tui_textarea::TextArea::default();
+            }
         }
+    }
+
+    // Recursively flattens the collection into a 1D list for the UI
+    pub fn get_visible_nodes(&self) -> Vec<VisibleNode> {
+        let mut result = Vec::new();
+        Self::flatten_items(
+            &self.root_collection.items,
+            &self.expanded_folders,
+            0,
+            &mut result,
+        );
+        result
+    }
+
+    fn flatten_items(
+        items: &[CollectionItem],
+        expanded: &HashSet<String>,
+        depth: usize,
+        result: &mut Vec<VisibleNode>,
+    ) {
+        for item in items {
+            match item {
+                CollectionItem::Folder(f) => {
+                    let is_expanded = expanded.contains(&f.id);
+                    result.push(VisibleNode {
+                        id: f.id.clone(),
+                        name: f.name.clone(),
+                        depth,
+                        node_type: NodeType::Folder {
+                            expended: is_expanded,
+                        },
+                    });
+
+                    // If it's open, recursively add its children right below it!
+                    if is_expanded {
+                        Self::flatten_items(&f.items, expanded, depth + 1, result);
+                    }
+                }
+                CollectionItem::Request(r) => {
+                    result.push(VisibleNode {
+                        id: r.id.clone(),
+                        name: r.name.clone(),
+                        depth,
+                        node_type: NodeType::Request(r.clone()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Intelligently adds a new request to the tree based on cursor position
+    pub fn add_new_request(&mut self, new_req: ApiRequest) {
+        let nodes = self.get_visible_nodes();
+
+        if let Some(active_node) = nodes.get(self.selected_node_idx) {
+            match &active_node.node_type {
+                NodeType::Folder { .. } => {
+                    // It's a folder! Insert inside it.
+                    Self::insert_into_folder(
+                        &mut self.root_collection.items,
+                        &active_node.id,
+                        new_req,
+                    );
+                    // Force the folder open so the user sees their new request
+                    self.expanded_folders.insert(active_node.id.clone());
+                }
+                NodeType::Request(_) => {
+                    // It's a request. Add to the root workspace.
+                    self.root_collection
+                        .items
+                        .push(CollectionItem::Request(new_req));
+                }
+            }
+        } else {
+            // Tree is completely empty. add to root
+            self.root_collection
+                .items
+                .push(CollectionItem::Request(new_req));
+        }
+    }
+
+    fn insert_into_folder(
+        items: &mut Vec<CollectionItem>,
+        target_folder_id: &str,
+        new_req: ApiRequest,
+    ) -> bool {
+        for item in items.iter_mut() {
+            if let CollectionItem::Folder(f) = item {
+                if f.id == target_folder_id {
+                    f.items.push(CollectionItem::Request(new_req.clone()));
+                    return true;
+                }
+                // Recursively check sub-folders
+                if Self::insert_into_folder(&mut f.items, target_folder_id, new_req.clone()) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Recursively finds a request in the tree and updates it
+    pub fn update_request_in_tree(&mut self, updated_req: &ApiRequest) {
+        Self::update_recursive(&mut self.root_collection.items, updated_req);
+    }
+
+    fn update_recursive(items: &mut [CollectionItem], updated_req: &ApiRequest) -> bool {
+        for item in items.iter_mut() {
+            match item {
+                CollectionItem::Request(r) if r.id == updated_req.id => {
+                    *r = updated_req.clone();
+                    return true;
+                }
+                CollectionItem::Folder(f) => {
+                    if Self::update_recursive(&mut f.items, updated_req) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Recursively finds and deletes a node (Folder or Request)
+    pub fn delete_node(&mut self, target_id: &str) {
+        Self::delete_recursive(&mut self.root_collection.items, target_id);
+    }
+
+    fn delete_recursive(items: &mut Vec<CollectionItem>, target_id: &str) -> bool {
+        // Check if the target is in the current list level
+        if let Some(pos) = items.iter().position(|i| match i {
+            CollectionItem::Request(r) => r.id == target_id,
+            CollectionItem::Folder(f) => f.id == target_id,
+        }) {
+            items.remove(pos);
+            return true;
+        }
+
+        // Otherwise, dig deeper into sub-folders
+        for item in items.iter_mut() {
+            if let CollectionItem::Folder(f) = item {
+                if Self::delete_recursive(&mut f.items, target_id) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn rename_node(&mut self, target_id: &str, new_name: &str) {
+        Self::rename_recursive(&mut self.root_collection.items, target_id, new_name);
+    }
+
+    fn rename_recursive(items: &mut Vec<CollectionItem>, target_id: &str, new_name: &str) -> bool {
+        for item in items.iter_mut() {
+            match item {
+                CollectionItem::Request(r) if r.id == target_id => {
+                    r.name = new_name.to_string();
+                    return true;
+                }
+                CollectionItem::Folder(f) => {
+                    if f.id == target_id {
+                        f.name = new_name.to_string();
+                        return true;
+                    }
+                    if Self::rename_recursive(&mut f.items, target_id, new_name) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
     }
 }
