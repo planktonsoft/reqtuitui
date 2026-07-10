@@ -16,7 +16,7 @@ A beautiful and efficient Terminal UI (TUI) for making HTTP requests, built with
 You can install `reqtuitui` via Homebrew using our custom tap:
 
 ```bash
-brew install planktonsoft/tap/reqtuitui
+brew install planktonsoft/homebrew-reqtuitui/reqtuitui
 ```
 
 ### Using Cargo
