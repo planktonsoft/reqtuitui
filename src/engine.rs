@@ -16,7 +16,11 @@ impl HttpManager {
     pub fn new() -> Self {
         Self {
             // A single client instance handles connection pooling
-            client: Client::new(),
+            // TODO: Add a configuration option to allow invalid SSL certificates.
+            client: Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .unwrap_or_default(),
             parser: TemplateParser::new(),
         }
     }
