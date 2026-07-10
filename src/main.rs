@@ -33,7 +33,7 @@ use crate::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Initialize Storage and Mock Data
-    let storage = StorageManager::new(".requestui_db")?;
+    let storage = StorageManager::new(".reqtuitui_db")?;
 
     // 2. RESTORE WORKSPACE FROM STORAGE (or create default)
     let root_workspace_id = "root_workspace";
