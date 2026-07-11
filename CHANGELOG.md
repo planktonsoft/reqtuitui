@@ -8,8 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.1] - 2026-07-11
 
 ### Added
-- Persistent global cookie jar with management UI and automatic header injection.
+- Persistent global cookie jar with management UI, automatic header injection, and response-based cookie extraction persistence.
 - Local mock server for request inspection and debugging (`test_server.py`).
+- Detailed documentation for the Cookie Jar and shortcut mappings in the project README.
 
 ## [0.1.0] - 2026-07-10
 
