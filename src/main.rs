@@ -733,6 +733,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     app.is_loading = false;
                     match res {
                         Ok(resp) => {
+                            // Update global cookies with any new cookies from the response
+                            if !resp.new_cookies.is_empty() {
+                                for (k, v) in resp.new_cookies.iter() {
+                                    app.global_cookies.insert(k.clone(), v.clone());
+                                }
+                                let _ = storage.save_global_cookies(&app.global_cookies);
+                            }
                             app.active_response = Some(resp);
                             app.status_message = Some("✅ Request completed.".to_string());
                         }
