@@ -88,6 +88,9 @@ pub struct App<'a> {
     pub cookie_popup_open: bool,
     pub cookie_input: tui_textarea::TextArea<'a>,
     pub global_cookies: HashMap<String, String>,
+
+    // --- Zen Mode State ---
+    pub zoom_editor_open: bool,
 }
 
 impl<'a> App<'a> {
@@ -124,6 +127,8 @@ impl<'a> App<'a> {
             cookie_popup_open: false,
             cookie_input: tui_textarea::TextArea::default(),
             global_cookies: HashMap::new(),
+
+            zoom_editor_open: false,
         };
 
         app.sync_ui_to_selected_node();

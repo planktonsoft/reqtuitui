@@ -378,6 +378,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // --- GLOBAL TAB NAVIGATION ---
                 if key.code == KeyCode::Tab {
+                    app.zoom_editor_open = false;
+
                     app.focus = match app.focus {
                         Focus::Sidebar => Focus::UrlBar,
                         Focus::UrlBar => Focus::HeadersEditor,
@@ -561,6 +563,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
+                if key.code == KeyCode::F(2) {
+                    if app.focus == Focus::HeadersEditor || app.focus == Focus::BodyEditor {
+                        app.zoom_editor_open = !app.zoom_editor_open;
+                    } else {
+                        app.status_message =
+                            Some("⚠️ You can only zoom the Headers or Body editors.".to_string());
+                    }
+                    continue;
+                }
+
+                if key.code == KeyCode::F(3) {
+                    if app.focus == Focus::BodyEditor {
+                        let raw_text = app.body_input.lines().join("\n");
+
+                        if let Ok(parsed_json) =
+                            serde_json::from_str::<serde_json::Value>(&raw_text)
+                        {
+                            if let Ok(pretty_json) = serde_json::to_string_pretty(&parsed_json) {
+                                app.body_input = tui_textarea::TextArea::new(
+                                    pretty_json.lines().map(String::from).collect(),
+                                );
+                                app.status_message =
+                                    Some("✨ JSON perfectly formatted!".to_string());
+                            }
+                        } else {
+                            app.status_message =
+                                Some("❌ Invalid JSON! Cannot format.".to_string());
+                        }
+                    } else {
+                        app.status_message =
+                            Some("⚠️ You must be in the Body Editor to format JSON.".to_string());
+                    }
+                    continue;
+                }
+
                 // --- PANE-SPECIFIC CONTROLS ---
                 match app.focus {
                     Focus::Sidebar => {
@@ -669,7 +706,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     Focus::UrlBar => match key.code {
                         KeyCode::Esc => {
-                            // Escape returns focus to the sidebar
+                            app.zoom_editor_open = false;
                             app.focus = Focus::Sidebar;
                         }
                         KeyCode::Enter => {

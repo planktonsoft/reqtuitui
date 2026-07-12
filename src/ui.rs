@@ -45,6 +45,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.cookie_popup_open {
         render_cookie_popup(f, app);
     }
+
+    if app.zoom_editor_open {
+        render_zoomed_editor(f, app);
+    }
 }
 
 // Helper function to create a centered rectangle for out popup
@@ -66,6 +70,38 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn render_zoomed_editor(f: &mut Frame, app: &mut App) {
+    // Take up 80% of the screen
+    let area = centered_rect(80, 80, f.area());
+    f.render_widget(Clear, area);
+
+    match app.focus {
+        Focus::HeadersEditor => {
+            app.headers_input.set_block(
+                Block::default()
+                    .title(" 📝 Headers [ZEN MODE] (F2 to shrink, F3 to Format JSON) ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+
+            f.render_widget(&app.headers_input, area);
+        }
+        Focus::BodyEditor => {
+            app.body_input.set_block(
+                Block::default()
+                    .title(" 📝 Body [ZEN MODE] (F2 to shrink, F3 to Format JSON) ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+
+            f.render_widget(&app.body_input, area);
+        }
+        _ => {
+            app.zoom_editor_open = false;
+        }
+    }
 }
 
 fn render_cookie_popup(f: &mut Frame, app: &mut App) {
