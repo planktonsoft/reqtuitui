@@ -6,6 +6,7 @@ mod models;
 mod parser;
 mod storage;
 mod ui;
+mod response_viewer;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
@@ -363,7 +364,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || (is_ctrl && key.code == KeyCode::Char('u'))
                     || (is_shift && key.code == KeyCode::Up)
                 {
-                    app.response_scroll = app.response_scroll.saturating_sub(3); // Scroll 3 lines at a time
+                    app.response_viewer.scroll_up(3);
                     continue;
                 }
 
@@ -372,7 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || (is_ctrl && key.code == KeyCode::Char('d'))
                     || (is_shift && key.code == KeyCode::Down)
                 {
-                    app.response_scroll = app.response_scroll.saturating_add(3);
+                    app.response_viewer.scroll_down(3);
                     continue;
                 }
 
@@ -763,7 +764,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match msg {
                 UiMessage::RequestStarted => {
                     app.is_loading = true;
-                    app.response_scroll = 0; // <-- Reset scroll to top on new request
+                    app.response_viewer.reset_scroll();
                     app.active_response = None;
                 }
                 UiMessage::RequestCompleted(res) => {

@@ -2,15 +2,12 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Text},
     widgets::{
-        Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
+        Block, Borders, Clear, List, ListItem, Paragraph,
     },
 };
 
 use crate::app::{App, Focus, NodeType};
-use crate::formatter::format_json_response;
 
 pub fn render(f: &mut Frame, app: &mut App) {
     // Split the screen horizontally into Sidebar (25%) and Main Panel (75%)
@@ -411,48 +408,7 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 f.render_widget(&app.body_input, chunks[2]);
 
                 // Bottom: Response Area
-                let response_content = if app.is_loading {
-                    Text::raw("Sending request...")
-                } else if let Some(resp) = &app.active_response {
-                    // Run the body through our syntax highlighter
-                    let mut text = format_json_response(&resp.body);
-
-                    // Prepend the status code and time to the top of the formatted text
-                    let meta_line = Line::from(format!(
-                        "Status: {}\nTime: {}ms\n",
-                        resp.status_code, resp.duration_ms
-                    ));
-                    text.lines.insert(0, meta_line);
-                    text.lines.insert(1, Line::raw("")); // Blank line for spacing
-
-                    text
-                } else {
-                    Text::raw("Awaiting request...")
-                };
-
-                let content_len = response_content.lines.len();
-
-                let response_block = Paragraph::new(response_content)
-                    .block(
-                        Block::default()
-                            .title(" Response (PageUp/PageDown to scroll) ")
-                            .borders(Borders::ALL),
-                    )
-                    .scroll((app.response_scroll, 0));
-                f.render_widget(response_block, chunks[3]);
-
-                let mut scrollbar_state = ScrollbarState::default()
-                    .content_length(content_len)
-                    .position(app.response_scroll as usize);
-
-                f.render_stateful_widget(
-                    Scrollbar::default()
-                        .orientation(ScrollbarOrientation::VerticalRight)
-                        .begin_symbol(Some("▲"))
-                        .end_symbol(Some("▼")),
-                    chunks[3],
-                    &mut scrollbar_state,
-                );
+                app.response_viewer.render(f, chunks[3], app.is_loading, app.active_response.as_ref());
             }
 
             NodeType::Folder { .. } => {

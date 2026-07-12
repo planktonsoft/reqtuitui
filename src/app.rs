@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::models::{
     ApiRequest, ApiResponse, Collection, CollectionItem, EnvVariable, Environment, Folder,
 };
+use crate::response_viewer::ResponseViewer;
 use tui_input::Input;
 use tui_textarea::TextArea;
 
@@ -54,7 +55,7 @@ pub struct App<'a> {
     pub active_response: Option<ApiResponse>,
     pub is_loading: bool,
     pub status_message: Option<String>,
-    pub response_scroll: u16,
+    pub response_viewer: ResponseViewer,
 
     // --- Environment State ---
     pub environments: Vec<Environment>,
@@ -109,7 +110,7 @@ impl<'a> App<'a> {
             status_message: Some(
                 "Ready. Press Tab to navigate, Enter to send, Ctrl+S to save.".to_string(),
             ),
-            response_scroll: 0,
+            response_viewer: ResponseViewer::new(),
             environments: initial_envs,
             active_env_idx: None,
             env_popup_open: false,
