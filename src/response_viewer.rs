@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     text::{Line, Text},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 use crate::formatter::format_json_response;
@@ -63,6 +63,7 @@ impl ResponseViewer {
                     .title(" Response (PageUp/PageDown to scroll) ")
                     .borders(Borders::ALL),
             )
+            .wrap(Wrap { trim: false })
             .scroll((self.scroll, 0));
         f.render_widget(response_block, area);
 
