@@ -4,6 +4,7 @@ use crate::models::{
     ApiRequest, ApiResponse, Collection, CollectionItem, EnvVariable, Environment, Folder,
 };
 use crate::response_viewer::ResponseViewer;
+use crate::vim::VimMode;
 use tui_input::Input;
 use tui_textarea::TextArea;
 
@@ -92,6 +93,10 @@ pub struct App<'a> {
 
     // --- Zen Mode State ---
     pub zoom_editor_open: bool,
+
+    // --- Vim State ---
+    pub vim_emulation_active: bool,
+    pub vim_mode: VimMode,
 }
 
 impl<'a> App<'a> {
@@ -130,6 +135,9 @@ impl<'a> App<'a> {
             global_cookies: HashMap::new(),
 
             zoom_editor_open: false,
+
+            vim_emulation_active: false,
+            vim_mode: VimMode::Normal, // Start in Normal mode when enabled
         };
 
         app.sync_ui_to_selected_node();

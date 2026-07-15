@@ -7,6 +7,7 @@ mod parser;
 mod response_viewer;
 mod storage;
 mod ui;
+mod vim;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
@@ -26,6 +27,7 @@ use crate::app::{CurrentScreen, Focus, NodeType};
 use crate::models::{
     ApiRequest, BodyType, Collection, CollectionItem, EnvVariable, Folder, HttpMethod, RequestBody,
 };
+use crate::vim::{VimMode, apply_vim_style, handle_vim_key};
 use crate::{
     app::{App, UiMessage, WorkMessage},
     storage::StorageManager,
@@ -651,6 +653,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
+                if key.code == KeyCode::F(4) {
+                    app.vim_emulation_active = !app.vim_emulation_active;
+                    app.vim_mode = VimMode::Normal; // Reset to normal on toggle
+                    let status = if app.vim_emulation_active {
+                        "🟢 Vim Mode Enabled"
+                    } else {
+                        "🔴 Vim Mode Disabled"
+                    };
+                    app.status_message = Some(status.to_string());
+                    continue;
+                }
+
                 // --- PANE-SPECIFIC CONTROLS ---
                 match app.focus {
                     Focus::Sidebar => {
@@ -793,20 +807,107 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.url_input.handle_event(&Event::Key(key));
                         }
                     },
-                    Focus::HeadersEditor => match key.code {
-                        KeyCode::Esc => app.focus = Focus::Sidebar,
-                        _ => {
-                            app.headers_input.input(key);
+                    Focus::HeadersEditor => {
+                        if app.vim_emulation_active {
+                            apply_vim_style(&mut app.body_input, true, app.vim_mode);
+
+                            if handle_vim_key(&mut app.body_input, key, &mut app.vim_mode) {
+                                if key.code == KeyCode::Esc && app.vim_mode == VimMode::Normal {
+                                    app.zoom_editor_open = false;
+                                    app.focus = Focus::Sidebar;
+                                }
+                                continue;
+                            }
+                        } else {
+                            apply_vim_style(&mut app.body_input, false, app.vim_mode);
                         }
-                    },
-                    Focus::BodyEditor => match key.code {
-                        KeyCode::Esc => {
-                            app.focus = Focus::Sidebar;
+
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.zoom_editor_open = false;
+                                app.focus = Focus::Sidebar;
+                            }
+                            KeyCode::Char('s') if is_ctrl => {
+                                // SAVE LOGIC (Ctrl + S)
+                                let nodes = app.get_visible_nodes();
+                                if let Some(active_node) = nodes.get(app.selected_node_idx) {
+                                    if let NodeType::Request(req) = &active_node.node_type {
+                                        let mut updated_req = req.clone();
+
+                                        updated_req.url = app.url_input.value().to_string();
+                                        updated_req.headers =
+                                            parse_headers_from_ui(app.headers_input.lines());
+                                        updated_req.body.content =
+                                            Some(app.body_input.lines().join("\n"));
+
+                                        app.update_request_in_tree(&updated_req);
+                                        if let Err(e) =
+                                            storage.save_collection(&app.root_collection)
+                                        {
+                                            app.status_message =
+                                                Some(format!("❌ Failed to save headers: {}", e));
+                                        } else {
+                                            app.status_message =
+                                                Some("💾 Headers saved!".to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                app.body_input.input(key);
+                            }
                         }
-                        _ => {
-                            app.body_input.input(key);
+                    }
+                    Focus::BodyEditor => {
+                        if app.vim_emulation_active {
+                            apply_vim_style(&mut app.body_input, true, app.vim_mode);
+
+                            if handle_vim_key(&mut app.body_input, key, &mut app.vim_mode) {
+                                if key.code == KeyCode::Esc && app.vim_mode == VimMode::Normal {
+                                    app.zoom_editor_open = false;
+                                    app.focus = Focus::Sidebar;
+                                }
+                                continue;
+                            }
+                        } else {
+                            apply_vim_style(&mut app.body_input, false, app.vim_mode);
                         }
-                    },
+
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.zoom_editor_open = false;
+                                app.focus = Focus::Sidebar;
+                            }
+                            KeyCode::Char('s') if is_ctrl => {
+                                // SAVE LOGIC (Ctrl + S)
+                                let nodes = app.get_visible_nodes();
+                                if let Some(active_node) = nodes.get(app.selected_node_idx) {
+                                    if let NodeType::Request(req) = &active_node.node_type {
+                                        let mut updated_req = req.clone();
+
+                                        updated_req.url = app.url_input.value().to_string();
+                                        updated_req.headers =
+                                            parse_headers_from_ui(app.headers_input.lines());
+                                        updated_req.body.content =
+                                            Some(app.body_input.lines().join("\n"));
+
+                                        app.update_request_in_tree(&updated_req);
+                                        if let Err(e) =
+                                            storage.save_collection(&app.root_collection)
+                                        {
+                                            app.status_message =
+                                                Some(format!("❌ Failed to save body: {}", e));
+                                        } else {
+                                            app.status_message = Some("💾 Body saved!".to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                app.body_input.input(key);
+                            }
+                        }
+                    }
                 }
             }
         }
