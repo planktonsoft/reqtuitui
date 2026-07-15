@@ -60,7 +60,7 @@ impl ResponseViewer {
         let response_block = Paragraph::new(response_content)
             .block(
                 Block::default()
-                    .title(" Response (PageUp/PageDown to scroll) ")
+                    .title(" Response (PgUp/PgDn to scroll | Ctrl+C to copy) ")
                     .borders(Borders::ALL),
             )
             .wrap(Wrap { trim: false })

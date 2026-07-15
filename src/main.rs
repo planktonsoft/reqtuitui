@@ -377,6 +377,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
+                // Copy Response Body to Clipboard (macOS pbcopy)
+                if is_ctrl && key.code == KeyCode::Char('c') {
+                    if let Some(resp) = &app.active_response {
+                        use std::io::Write;
+                        use std::process::{Command, Stdio};
+                        let result = Command::new("pbcopy")
+                            .stdin(Stdio::piped())
+                            .spawn()
+                            .and_then(|mut child| {
+                                child.stdin.take().unwrap().write_all(resp.body.as_bytes())?;
+                                child.wait()
+                            });
+                        match result {
+                            Ok(_) => app.status_message = Some("Response body copied to clipboard!".to_string()),
+                            Err(e) => app.status_message = Some(format!("Copy failed: {}", e)),
+                        }
+                    } else {
+                        app.status_message = Some("No response to copy.".to_string());
+                    }
+                    continue;
+                }
+
                 // --- GLOBAL TAB NAVIGATION ---
                 if key.code == KeyCode::Tab {
                     app.zoom_editor_open = false;
