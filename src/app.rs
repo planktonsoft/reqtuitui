@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{
-    ApiRequest, ApiResponse, Collection, CollectionItem, Environment, Folder,
-};
+use crate::models::{ApiRequest, ApiResponse, Collection, CollectionItem, Environment, Folder};
 use crate::response_viewer::ResponseViewer;
 use crate::vim::VimMode;
 use tui_input::Input;

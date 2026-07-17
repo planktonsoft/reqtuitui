@@ -106,10 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 WorkMessage::RunRequest(req, env) => {
                     let req_id = req.id.clone();
                     let _ = tx_ui.send(UiMessage::RequestStarted(req_id.clone())).await;
-                    
+
                     let http_manager_clone = Arc::clone(&http_manager);
                     let tx_ui_clone = tx_ui.clone();
-                    
+
                     tokio::spawn(async move {
                         match http_manager_clone
                             .execute(req, env.as_ref())
@@ -117,10 +117,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .map_err(|e| e.to_string())
                         {
                             Ok(resp) => {
-                                let _ = tx_ui_clone.send(UiMessage::RequestCompleted(req_id, Ok(resp))).await;
+                                let _ = tx_ui_clone
+                                    .send(UiMessage::RequestCompleted(req_id, Ok(resp)))
+                                    .await;
                             }
                             Err(err_str) => {
-                                let _ = tx_ui_clone.send(UiMessage::RequestCompleted(req_id, Err(err_str))).await;
+                                let _ = tx_ui_clone
+                                    .send(UiMessage::RequestCompleted(req_id, Err(err_str)))
+                                    .await;
                             }
                         }
                     });
@@ -386,20 +390,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
-                // Copy Response Body to Clipboard (macOS pbcopy)
+                // Copy Response Body to Clipboard (Cross-platform)
                 if is_ctrl && key.code == KeyCode::Char('c') {
                     if let Some(resp) = &app.active_response {
-                        use std::io::Write;
-                        use std::process::{Command, Stdio};
-                        let result = Command::new("pbcopy")
-                            .stdin(Stdio::piped())
-                            .spawn()
-                            .and_then(|mut child| {
-                                child.stdin.take().unwrap().write_all(resp.body.as_bytes())?;
-                                child.wait()
-                            });
-                        match result {
-                            Ok(_) => app.status_message = Some("Response body copied to clipboard!".to_string()),
+                        // Prettify JSON if valid, otherwise copy raw
+                        let body_to_copy = match serde_json::from_str::<serde_json::Value>(&resp.body) {
+                            Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| resp.body.clone()),
+                            Err(_) => resp.body.clone(),
+                        };
+
+                        match arboard::Clipboard::new()
+                            .and_then(|mut cb| cb.set_text(body_to_copy))
+                        {
+                            Ok(_) => {
+                                app.status_message =
+                                    Some("Response body copied to clipboard!".to_string())
+                            }
                             Err(e) => app.status_message = Some(format!("Copy failed: {}", e)),
                         }
                     } else {
@@ -954,7 +960,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 UiMessage::RequestCompleted(req_id, res) => {
                     app.loading_requests.remove(&req_id);
-                    
+
                     let mut display_res = None;
                     match res.as_ref() {
                         Ok(resp) => {
