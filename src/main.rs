@@ -104,19 +104,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Some(message) = rx_worker.recv().await {
             match message {
                 WorkMessage::RunRequest(req, env) => {
-                    let _ = tx_ui.send(UiMessage::RequestStarted).await;
-                    match http_manager
-                        .execute(req, env.as_ref())
-                        .await
-                        .map_err(|e| e.to_string())
-                    {
-                        Ok(resp) => {
-                            let _ = tx_ui.send(UiMessage::RequestCompleted(Ok(resp))).await;
+                    let req_id = req.id.clone();
+                    let _ = tx_ui.send(UiMessage::RequestStarted(req_id.clone())).await;
+                    
+                    let http_manager_clone = Arc::clone(&http_manager);
+                    let tx_ui_clone = tx_ui.clone();
+                    
+                    tokio::spawn(async move {
+                        match http_manager_clone
+                            .execute(req, env.as_ref())
+                            .await
+                            .map_err(|e| e.to_string())
+                        {
+                            Ok(resp) => {
+                                let _ = tx_ui_clone.send(UiMessage::RequestCompleted(req_id, Ok(resp))).await;
+                            }
+                            Err(err_str) => {
+                                let _ = tx_ui_clone.send(UiMessage::RequestCompleted(req_id, Err(err_str))).await;
+                            }
                         }
-                        Err(err_str) => {
-                            let _ = tx_ui.send(UiMessage::RequestCompleted(Err(err_str))).await;
-                        }
-                    }
+                    });
                 }
             }
         }
@@ -915,14 +922,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Process any incoming messages from our network worker thread
         while let Ok(msg) = rx_ui.try_recv() {
             match msg {
-                UiMessage::RequestStarted => {
-                    app.is_loading = true;
-                    app.response_viewer.reset_scroll();
-                    app.active_response = None;
+                UiMessage::RequestStarted(req_id) => {
+                    app.loading_requests.insert(req_id.clone());
+                    if Some(&req_id) == app.active_request_id.as_ref() {
+                        app.is_loading = true;
+                        app.response_viewer.reset_scroll();
+                        app.active_response = None;
+                    }
                 }
-                UiMessage::RequestCompleted(res) => {
-                    app.is_loading = false;
-                    match res {
+                UiMessage::RequestCompleted(req_id, res) => {
+                    app.loading_requests.remove(&req_id);
+                    
+                    let mut display_res = None;
+                    match res.as_ref() {
                         Ok(resp) => {
                             // Update global cookies with any new cookies from the response
                             if !resp.new_cookies.is_empty() {
@@ -931,10 +943,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 let _ = storage.save_global_cookies(&app.global_cookies);
                             }
-                            app.active_response = Some(resp);
-                            app.status_message = Some("✅ Request completed.".to_string());
+                            app.responses.insert(req_id.clone(), resp.clone());
+                            display_res = Some(resp.clone());
                         }
-                        Err(e) => app.status_message = Some(format!("❌ Network Error: {}", e)),
+                        Err(_) => {}
+                    }
+
+                    if Some(&req_id) == app.active_request_id.as_ref() {
+                        app.is_loading = false;
+                        if let Some(r) = display_res {
+                            app.active_response = Some(r);
+                            app.status_message = Some("✅ Request completed.".to_string());
+                        } else if let Err(e) = res {
+                            app.status_message = Some(format!("❌ Network Error: {}", e));
+                        }
                     }
                 }
             }

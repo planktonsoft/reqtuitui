@@ -85,7 +85,7 @@ pub struct Collection {
     pub items: Vec<CollectionItem>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiResponse {
     pub status_code: u16,
     pub headers: HashMap<String, String>,
