@@ -57,6 +57,11 @@ pub struct ApiRequest {
     pub headers: HashMap<String, String>,
     pub query_params: HashMap<String, String>,
     pub body: RequestBody,
+
+    #[serde(default)]
+    pub pre_script: Option<String>,
+    #[serde(default)]
+    pub post_script: Option<String>,
 }
 
 // -----------------------------------------

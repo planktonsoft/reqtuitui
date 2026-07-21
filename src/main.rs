@@ -86,6 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         body_type: models::BodyType::None,
                         content: None,
                     },
+                    pre_script: None,
+                    post_script: None,
                 })],
             })],
         },
@@ -394,13 +396,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if is_ctrl && key.code == KeyCode::Char('c') {
                     if let Some(resp) = &app.active_response {
                         // Prettify JSON if valid, otherwise copy raw
-                        let body_to_copy = match serde_json::from_str::<serde_json::Value>(&resp.body) {
-                            Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| resp.body.clone()),
-                            Err(_) => resp.body.clone(),
-                        };
+                        let body_to_copy =
+                            match serde_json::from_str::<serde_json::Value>(&resp.body) {
+                                Ok(val) => serde_json::to_string_pretty(&val)
+                                    .unwrap_or_else(|_| resp.body.clone()),
+                                Err(_) => resp.body.clone(),
+                            };
 
-                        match arboard::Clipboard::new()
-                            .and_then(|mut cb| cb.set_text(body_to_copy))
+                        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(body_to_copy))
                         {
                             Ok(_) => {
                                 app.status_message =
@@ -477,6 +480,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             body_type: BodyType::None,
                             content: None,
                         },
+                        pre_script: None,
+                        post_script: None,
                     };
 
                     app.add_new_request(blank_request);

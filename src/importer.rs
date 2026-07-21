@@ -93,6 +93,8 @@ pub fn parse_curl(curl_string: &str) -> Result<ApiRequest, String> {
         headers,
         query_params: HashMap::new(),
         body: req_body,
+        pre_script: None,
+        post_script: None,
     })
 }
 

@@ -22,6 +22,7 @@ tui-input = "0.14"
 tui-textarea = "0.7.0"
 uuid = { version = "1.24.0", features = ["v4"] }
 arboard = "3"
+rhai = { version = "1.25.1", features = ["serde"] }
 
 # The profile that 'dist' will build with
 [profile.dist]
