@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-23
+
+### Added
+- Integrated Rhai scripting engine with support for pre-request and post-request scripts on Request models.
+- Cross-platform clipboard copying for response bodies via `Ctrl+C` shortcut with automatic JSON formatting.
+- Quality enforcement and mutation testing tooling (`cargo-crap`, `cargo-mutants`, and git pre-commit hooks).
+
+### Changed
+- Improved JSON response formatting performance using `std::sync::LazyLock` regex compilation.
+- Refactored `HttpManager` request execution logic into modular helper functions.
+- Optimized sidebar tree manipulation, node renaming, and zen mode editor rendering.
+
 ## [0.1.4] - 2026-07-17
 
 ### Added
