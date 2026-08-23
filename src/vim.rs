@@ -78,16 +78,178 @@ pub fn handle_vim_key(textarea: &mut TextArea, key: KeyEvent, vim_mode: &mut Vim
 
 /// Helper to update the cursor block style based on Vim mode
 pub fn apply_vim_style(textarea: &mut TextArea, is_active: bool, mode: VimMode) {
-    if is_active {
-        if mode == VimMode::Normal {
-            // Solid block cursor for Normal mode
-            textarea.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED));
-        } else {
-            // Line cursor for Insert mode
-            textarea.set_cursor_style(Style::default().add_modifier(Modifier::UNDERLINED));
+    let modifier = match (is_active, mode) {
+        (true, VimMode::Insert) => Modifier::UNDERLINED,
+        _ => Modifier::REVERSED,
+    };
+    textarea.set_cursor_style(Style::default().add_modifier(modifier));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_apply_vim_style() {
+        let mut textarea = TextArea::default();
+
+        apply_vim_style(&mut textarea, true, VimMode::Normal);
+        assert_eq!(
+            textarea.cursor_style(),
+            Style::default().add_modifier(Modifier::REVERSED)
+        );
+
+        apply_vim_style(&mut textarea, true, VimMode::Insert);
+        assert_eq!(
+            textarea.cursor_style(),
+            Style::default().add_modifier(Modifier::UNDERLINED)
+        );
+
+        apply_vim_style(&mut textarea, false, VimMode::Normal);
+        assert_eq!(
+            textarea.cursor_style(),
+            Style::default().add_modifier(Modifier::REVERSED)
+        );
+
+        apply_vim_style(&mut textarea, false, VimMode::Insert);
+        assert_eq!(
+            textarea.cursor_style(),
+            Style::default().add_modifier(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn test_handle_vim_key_normal_mode_insert_triggers() {
+        let mut textarea = TextArea::default();
+        let mut mode = VimMode::Normal;
+
+        // 'i'
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert!(handled);
+        assert_eq!(mode, VimMode::Insert);
+
+        // Reset to normal via Esc
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert!(handled);
+        assert_eq!(mode, VimMode::Normal);
+
+        // 'a'
+        handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert_eq!(mode, VimMode::Insert);
+
+        mode = VimMode::Normal;
+        // 'I'
+        handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT),
+            &mut mode,
+        );
+        assert_eq!(mode, VimMode::Insert);
+
+        mode = VimMode::Normal;
+        // 'A'
+        handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT),
+            &mut mode,
+        );
+        assert_eq!(mode, VimMode::Insert);
+
+        mode = VimMode::Normal;
+        // 'o'
+        handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert_eq!(mode, VimMode::Insert);
+
+        mode = VimMode::Normal;
+        // 'O'
+        handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT),
+            &mut mode,
+        );
+        assert_eq!(mode, VimMode::Insert);
+    }
+
+    #[test]
+    fn test_handle_vim_key_navigation_and_editing() {
+        let mut textarea = TextArea::default();
+        textarea.insert_str("hello world");
+        let mut mode = VimMode::Normal;
+
+        // Navigation keys
+        let nav_keys = ['h', 'j', 'k', 'l', 'w', 'b', '0', '$'];
+        for k in nav_keys {
+            let handled = handle_vim_key(
+                &mut textarea,
+                KeyEvent::new(KeyCode::Char(k), KeyModifiers::NONE),
+                &mut mode,
+            );
+            assert!(handled);
+            assert_eq!(mode, VimMode::Normal);
         }
-    } else {
-        // Default block for non-vim
-        textarea.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED));
+
+        // Delete char 'x'
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert!(handled);
+
+        // Undo 'u'
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert!(handled);
+
+        // Redo 'Ctrl+r'
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            &mut mode,
+        );
+        assert!(handled);
+
+        // Unmapped key in normal mode
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert!(handled);
+    }
+
+    #[test]
+    fn test_handle_vim_key_insert_mode_typing() {
+        let mut textarea = TextArea::default();
+        let mut mode = VimMode::Insert;
+
+        // In insert mode, normal typing is not absorbed by vim engine
+        let handled = handle_vim_key(
+            &mut textarea,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            &mut mode,
+        );
+        assert!(!handled);
+        assert_eq!(mode, VimMode::Insert);
     }
 }
+
