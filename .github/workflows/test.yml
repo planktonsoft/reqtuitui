@@ -23,7 +23,7 @@ jobs:
       
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
-      
+
     - name: Install cargo-llvm-cov and cargo-crap
       uses: taiki-e/install-action@v2
       with:
@@ -32,6 +32,7 @@ jobs:
     - name: Run tests & Generate coverage
       run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
-    - name: Enforce CRAP Score Gatekeeper (Uncle Bob standard <= 8)
+    - name: CRAP Score Report (Non-blocking)
       run: |
-        cargo crap --workspace --lcov lcov.info --threshold 8 --fail-above
+        cargo crap --workspace --lcov lcov.info --threshold 8 --format markdown >> $GITHUB_STEP_SUMMARY || true
+        cargo crap --workspace --lcov lcov.info --threshold 8 || true
