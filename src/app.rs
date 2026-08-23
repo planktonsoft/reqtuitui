@@ -341,18 +341,18 @@ impl<'a> App<'a> {
         Self::rename_recursive(&mut self.root_collection.items, target_id, new_name);
     }
 
-    fn rename_recursive(items: &mut Vec<CollectionItem>, target_id: &str, new_name: &str) -> bool {
+    fn rename_recursive(items: &mut [CollectionItem], target_id: &str, new_name: &str) -> bool {
         for item in items.iter_mut() {
             match item {
                 CollectionItem::Request(r) if r.id == target_id => {
                     r.name = new_name.to_string();
                     return true;
                 }
+                CollectionItem::Folder(f) if f.id == target_id => {
+                    f.name = new_name.to_string();
+                    return true;
+                }
                 CollectionItem::Folder(f) => {
-                    if f.id == target_id {
-                        f.name = new_name.to_string();
-                        return true;
-                    }
                     if Self::rename_recursive(&mut f.items, target_id, new_name) {
                         return true;
                     }
@@ -489,5 +489,118 @@ mod tests {
         let req2 = sample_request("r2", "Req 2");
         app.add_new_request(req2);
         assert_eq!(app.root_collection.items.len(), 3);
+    }
+
+    #[test]
+    fn test_rename_node_direct_and_nested() {
+        let mut child_folder = sample_folder("c1", "Old Child");
+        child_folder
+            .items
+            .push(CollectionItem::Request(sample_request("r_sub", "Old Sub")));
+
+        let mut parent_folder = sample_folder("p1", "Old Parent");
+        parent_folder
+            .items
+            .push(CollectionItem::Folder(child_folder));
+
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: vec![
+                CollectionItem::Request(sample_request("r_root", "Old Root Req")),
+                CollectionItem::Folder(parent_folder),
+            ],
+        };
+        let mut app = App::new(root, Vec::new());
+
+        // Rename root request
+        app.rename_node("r_root", "New Root Req");
+        match &app.root_collection.items[0] {
+            CollectionItem::Request(r) => assert_eq!(r.name, "New Root Req"),
+            _ => panic!("Expected request"),
+        }
+
+        // Rename root folder
+        app.rename_node("p1", "New Parent");
+        match &app.root_collection.items[1] {
+            CollectionItem::Folder(f) => assert_eq!(f.name, "New Parent"),
+            _ => panic!("Expected folder"),
+        }
+
+        // Rename nested child folder
+        app.rename_node("c1", "New Child");
+        match &app.root_collection.items[1] {
+            CollectionItem::Folder(f) => match &f.items[0] {
+                CollectionItem::Folder(c) => assert_eq!(c.name, "New Child"),
+                _ => panic!("Expected child folder"),
+            },
+            _ => panic!("Expected parent folder"),
+        }
+
+        // Rename deeply nested request
+        app.rename_node("r_sub", "New Sub");
+        match &app.root_collection.items[1] {
+            CollectionItem::Folder(f) => match &f.items[0] {
+                CollectionItem::Folder(c) => match &c.items[0] {
+                    CollectionItem::Request(r) => assert_eq!(r.name, "New Sub"),
+                    _ => panic!("Expected request"),
+                },
+                _ => panic!("Expected child folder"),
+            },
+            _ => panic!("Expected parent folder"),
+        }
+
+        // Rename non-existent ID
+        app.rename_node("non_existent", "Whatever");
+    }
+
+    #[test]
+    fn test_update_and_delete_node() {
+        let mut sub_folder = sample_folder("sf1", "SubFolder");
+        sub_folder
+            .items
+            .push(CollectionItem::Request(sample_request("r_sub", "Sub Req")));
+
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: vec![
+                CollectionItem::Request(sample_request("r1", "Req 1")),
+                CollectionItem::Folder(sub_folder),
+            ],
+        };
+        let mut app = App::new(root, Vec::new());
+
+        // Update nested request
+        let mut updated = sample_request("r_sub", "Updated Sub Req");
+        updated.url = "https://updated.com".to_string();
+        app.update_request_in_tree(&updated);
+
+        match &app.root_collection.items[1] {
+            CollectionItem::Folder(f) => match &f.items[0] {
+                CollectionItem::Request(r) => {
+                    assert_eq!(r.name, "Updated Sub Req");
+                    assert_eq!(r.url, "https://updated.com");
+                }
+                _ => panic!("Expected request"),
+            },
+            _ => panic!("Expected folder"),
+        }
+
+        // Delete nested request
+        app.delete_node("r_sub");
+        match &app.root_collection.items[1] {
+            CollectionItem::Folder(f) => assert_eq!(f.items.len(), 0),
+            _ => panic!("Expected folder"),
+        }
+
+        // Delete root request
+        app.delete_node("r1");
+        assert_eq!(app.root_collection.items.len(), 1);
+
+        // Delete non-existent
+        app.delete_node("unknown");
     }
 }
