@@ -1,0 +1,5 @@
+# cargo-crap configuration
+# Uncle Bob Clean Code threshold: CC <= 3 with high coverage or CC <= 2
+threshold = 8.0
+fail-above = true
+missing = "pessimistic"
