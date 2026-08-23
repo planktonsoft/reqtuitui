@@ -233,29 +233,20 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Intelligently adds a new request to the tree based on cursor position
-    pub fn add_new_request(&mut self, new_req: ApiRequest) {
+    /// Intelligently adds a new item (request or folder) to the tree based on cursor position
+    pub fn add_item_to_tree(&mut self, new_item: CollectionItem) {
         let nodes = self.get_visible_nodes();
-        let new_item = CollectionItem::Request(new_req);
 
         if let Some(active_node) = nodes.get(self.selected_node_idx) {
             match &active_node.node_type {
-                NodeType::Folder { expended } => {
-                    if *expended {
-                        Self::insert_item_into_folder(
-                            &mut self.root_collection.items,
-                            &active_node.id,
-                            new_item,
-                        );
-                    } else {
-                        Self::insert_sibling_after(
-                            &mut self.root_collection.items,
-                            &active_node.id,
-                            new_item,
-                        );
-                    }
+                NodeType::Folder { expended: true } => {
+                    Self::insert_item_into_folder(
+                        &mut self.root_collection.items,
+                        &active_node.id,
+                        new_item,
+                    );
                 }
-                NodeType::Request(_) => {
+                _ => {
                     Self::insert_sibling_after(
                         &mut self.root_collection.items,
                         &active_node.id,
@@ -264,43 +255,17 @@ impl<'a> App<'a> {
                 }
             }
         } else {
-            // Tree is completely empty. add to root
             self.root_collection.items.push(new_item);
         }
     }
 
-    pub fn add_new_folder(&mut self, new_folder: Folder) {
-        let nodes = self.get_visible_nodes();
-        let new_item = CollectionItem::Folder(new_folder);
+    /// Intelligently adds a new request to the tree based on cursor position
+    pub fn add_new_request(&mut self, new_req: ApiRequest) {
+        self.add_item_to_tree(CollectionItem::Request(new_req));
+    }
 
-        if let Some(active_node) = nodes.get(self.selected_node_idx) {
-            match &active_node.node_type {
-                NodeType::Folder { expended } => {
-                    if *expended {
-                        Self::insert_item_into_folder(
-                            &mut self.root_collection.items,
-                            &active_node.id,
-                            new_item,
-                        );
-                    } else {
-                        Self::insert_sibling_after(
-                            &mut self.root_collection.items,
-                            &active_node.id,
-                            new_item,
-                        );
-                    }
-                }
-                NodeType::Request(_) => {
-                    Self::insert_sibling_after(
-                        &mut self.root_collection.items,
-                        &active_node.id,
-                        new_item,
-                    );
-                }
-            }
-        } else {
-            self.root_collection.items.push(new_item);
-        }
+    pub fn add_new_folder(&mut self, new_folder: Folder) {
+        self.add_item_to_tree(CollectionItem::Folder(new_folder));
     }
 
     fn insert_item_into_folder(
@@ -423,5 +388,106 @@ impl<'a> App<'a> {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{BodyType, HttpMethod, RequestBody};
+
+    fn sample_request(id: &str, name: &str) -> ApiRequest {
+        ApiRequest {
+            id: id.to_string(),
+            name: name.to_string(),
+            url: "https://example.com".to_string(),
+            method: HttpMethod::GET,
+            headers: HashMap::new(),
+            query_params: HashMap::new(),
+            body: RequestBody {
+                body_type: BodyType::None,
+                content: None,
+            },
+            pre_script: None,
+            post_script: None,
+        }
+    }
+
+    fn sample_folder(id: &str, name: &str) -> Folder {
+        Folder {
+            id: id.to_string(),
+            name: name.to_string(),
+            items: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_add_new_folder_to_empty_tree() {
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: Vec::new(),
+        };
+        let mut app = App::new(root, Vec::new());
+        assert_eq!(app.root_collection.items.len(), 0);
+
+        let folder = sample_folder("f1", "Folder 1");
+        app.add_new_folder(folder);
+
+        assert_eq!(app.root_collection.items.len(), 1);
+        match &app.root_collection.items[0] {
+            CollectionItem::Folder(f) => assert_eq!(f.name, "Folder 1"),
+            _ => panic!("Expected folder"),
+        }
+    }
+
+    #[test]
+    fn test_add_new_folder_inside_expanded_folder() {
+        let parent_folder = sample_folder("p1", "Parent");
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: vec![CollectionItem::Folder(parent_folder)],
+        };
+        let mut app = App::new(root, Vec::new());
+        app.expanded_folders.insert("p1".to_string());
+        app.selected_node_idx = 0;
+
+        let child_folder = sample_folder("c1", "Child");
+        app.add_new_folder(child_folder);
+
+        match &app.root_collection.items[0] {
+            CollectionItem::Folder(parent) => {
+                assert_eq!(parent.items.len(), 1);
+                match &parent.items[0] {
+                    CollectionItem::Folder(c) => assert_eq!(c.id, "c1"),
+                    _ => panic!("Expected child folder"),
+                }
+            }
+            _ => panic!("Expected parent folder"),
+        }
+    }
+
+    #[test]
+    fn test_add_new_folder_and_request_as_sibling() {
+        let req1 = sample_request("r1", "Req 1");
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: vec![CollectionItem::Request(req1)],
+        };
+        let mut app = App::new(root, Vec::new());
+        app.selected_node_idx = 0;
+
+        let folder = sample_folder("f1", "Folder 1");
+        app.add_new_folder(folder);
+        assert_eq!(app.root_collection.items.len(), 2);
+
+        let req2 = sample_request("r2", "Req 2");
+        app.add_new_request(req2);
+        assert_eq!(app.root_collection.items.len(), 3);
     }
 }
