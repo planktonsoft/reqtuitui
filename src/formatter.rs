@@ -1,14 +1,14 @@
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
+
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use regex::{Captures, Regex};
 use serde_json::Value;
 
-lazy_static! {
-    static ref JSON_HIGHLIGHT_RE: Regex =
-        Regex::new(r#"(".*?"\s*:)|(".*?")|(\b\d+\.?\d*\b)|(\b(?:true|false|null)\b)"#)
-            .expect("valid json highlight regex");
-}
+static JSON_HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(".*?"\s*:)|(".*?")|(\b\d+\.?\d*\b)|(\b(?:true|false|null)\b)"#)
+        .expect("valid json highlight regex")
+});
 
 fn prettify_json(raw: &str) -> String {
     match serde_json::from_str::<Value>(raw) {
@@ -24,10 +24,8 @@ fn capture_style(cap: &Captures) -> Style {
         Style::default().fg(Color::LightGreen) // Strings
     } else if cap.get(3).is_some() {
         Style::default().fg(Color::LightYellow) // Numbers
-    } else if cap.get(4).is_some() {
-        Style::default().fg(Color::LightMagenta) // Booleans/Null
     } else {
-        Style::default()
+        Style::default().fg(Color::LightMagenta) // Booleans/Null
     }
 }
 
