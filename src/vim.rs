@@ -252,4 +252,3 @@ mod tests {
         assert_eq!(mode, VimMode::Insert);
     }
 }
-
