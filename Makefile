@@ -1,4 +1,4 @@
-.PHONY: all build run test cov crap fmt lint pre-commit install-hooks setup-tools clean help
+.PHONY: all build run test cov crap mutants fmt lint pre-commit install-hooks setup-tools clean help
 
 all: build
 
@@ -17,6 +17,9 @@ cov:
 crap:
 	cargo llvm-cov --workspace --lcov --output-path lcov.info
 	cargo crap --workspace --lcov lcov.info --threshold 8 --fail-above
+
+mutants:
+	cargo mutants
 
 fmt:
 	cargo fmt --all -- --check
@@ -37,7 +40,7 @@ install-hooks:
 
 setup-tools:
 	rustup component add llvm-tools-preview
-	cargo install --locked cargo-llvm-cov cargo-crap
+	cargo install --locked cargo-llvm-cov cargo-crap cargo-mutants
 
 clean:
 	cargo clean
@@ -49,10 +52,11 @@ help:
 	@echo "  test          - Run unit tests (cargo test)"
 	@echo "  cov           - Run code coverage (rustup run nightly cargo llvm-cov)"
 	@echo "  crap          - Enforce CRAP score gatekeeper (cargo crap)"
+	@echo "  mutants       - Run mutation testing (cargo mutants)"
 	@echo "  fmt           - Check code formatting (cargo fmt)"
 	@echo "  lint          - Run clippy lints (cargo clippy)"
 	@echo "  pre-commit    - Run all pre-commit checks (fmt, lint, crap)"
 	@echo "  install-hooks - Install git pre-commit hook"
-	@echo "  setup-tools   - Install required CLI tools (cargo-llvm-cov, cargo-crap)"
+	@echo "  setup-tools   - Install required CLI tools (cargo-llvm-cov, cargo-crap, cargo-mutants)"
 	@echo "  clean         - Clean build artifacts (cargo clean)"
 

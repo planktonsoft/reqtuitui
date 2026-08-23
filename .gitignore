@@ -1,3 +1,5 @@
 /target
 /.reqtuitui_db
 lcov.info
+mutants.out
+mutants.out.old

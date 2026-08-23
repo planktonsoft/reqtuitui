@@ -24,10 +24,10 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
 
-    - name: Install cargo-llvm-cov and cargo-crap
+    - name: Install cargo-llvm-cov, cargo-crap, and cargo-mutants
       uses: taiki-e/install-action@v2
       with:
-        tool: cargo-llvm-cov,cargo-crap
+        tool: cargo-llvm-cov,cargo-crap,cargo-mutants
 
     - name: Run tests & Generate coverage
       run: cargo llvm-cov --workspace --lcov --output-path lcov.info
@@ -36,3 +36,12 @@ jobs:
       run: |
         cargo crap --workspace --lcov lcov.info --threshold 8 --format markdown >> $GITHUB_STEP_SUMMARY || true
         cargo crap --workspace --lcov lcov.info --threshold 8 || true
+
+    - name: Mutation Testing (cargo-mutants)
+      run: |
+        echo "### 🧬 Mutation Testing Report" >> $GITHUB_STEP_SUMMARY
+        cargo mutants --no-shuffle 2>&1 | tee mutants-output.txt || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        cat mutants-output.txt >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
