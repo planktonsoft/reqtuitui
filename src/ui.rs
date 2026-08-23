@@ -67,6 +67,13 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+fn zen_mode_block(title: &'static str) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+}
+
 fn render_zoomed_editor(f: &mut Frame, app: &mut App) {
     // Take up 80% of the screen
     let area = centered_rect(80, 80, f.area());
@@ -74,23 +81,15 @@ fn render_zoomed_editor(f: &mut Frame, app: &mut App) {
 
     match app.focus {
         Focus::HeadersEditor => {
-            app.headers_input.set_block(
-                Block::default()
-                    .title(" 📝 Headers [ZEN MODE] (F2 to shrink, F3 to Format JSON) ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan)),
-            );
-
+            app.headers_input.set_block(zen_mode_block(
+                " 📝 Headers [ZEN MODE] (F2 to shrink, F3 to Format JSON) ",
+            ));
             f.render_widget(&app.headers_input, area);
         }
         Focus::BodyEditor => {
-            app.body_input.set_block(
-                Block::default()
-                    .title(" 📝 Body [ZEN MODE] (F2 to shrink, F3 to Format JSON) ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan)),
-            );
-
+            app.body_input.set_block(zen_mode_block(
+                " 📝 Body [ZEN MODE] (F2 to shrink, F3 to Format JSON) ",
+            ));
             f.render_widget(&app.body_input, area);
         }
         _ => {
@@ -439,4 +438,83 @@ fn render_main_panel(f: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(status_text).style(Style::default().bg(Color::Blue).fg(Color::White));
 
     f.render_widget(status_bar, status_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Collection;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn test_render_zoomed_editor_headers() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: Vec::new(),
+        };
+        let mut app = App::new(root, Vec::new());
+        app.focus = Focus::HeadersEditor;
+        app.zoom_editor_open = true;
+
+        terminal
+            .draw(|f| {
+                render_zoomed_editor(f, &mut app);
+            })
+            .unwrap();
+
+        assert!(app.zoom_editor_open);
+    }
+
+    #[test]
+    fn test_render_zoomed_editor_body() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: Vec::new(),
+        };
+        let mut app = App::new(root, Vec::new());
+        app.focus = Focus::BodyEditor;
+        app.zoom_editor_open = true;
+
+        terminal
+            .draw(|f| {
+                render_zoomed_editor(f, &mut app);
+            })
+            .unwrap();
+
+        assert!(app.zoom_editor_open);
+    }
+
+    #[test]
+    fn test_render_zoomed_editor_other_focus_closes_zoom() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let root = Collection {
+            id: "root".to_string(),
+            name: "Root".to_string(),
+            description: None,
+            items: Vec::new(),
+        };
+        let mut app = App::new(root, Vec::new());
+        app.focus = Focus::Sidebar;
+        app.zoom_editor_open = true;
+
+        terminal
+            .draw(|f| {
+                render_zoomed_editor(f, &mut app);
+            })
+            .unwrap();
+
+        assert!(!app.zoom_editor_open);
+    }
 }
